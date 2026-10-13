@@ -1,0 +1,67 @@
+Fair Value Gap Trading Strategy (4H
+and 15 Min)
+Bullish Example
+
+Wait for a Fair Value Gap (FVG) to form on the 4H chart as shown below.
+
+
+
+
+Wait for price to return to the 4H FVG on the 15 min chart. Price should quickly shoot off
+once hitting the 4H FVG and leave a new smaller FVG on the 15 minute chart as shown
+below.
+Enter on that 15 min FVG that is formed. Your stop loss should be at the swing low and you
+should target at most a 3RR. A 2RR is also great.
+
+
+
+
+This is a simple high probability trading model which combines the higher time frames (4H)
+with the lower time frames (15 Min). I would recommend using this on multiple pairs to give
+you more setups.
+
+
+Bearish Example
+
+Wait for a FVG to form on the 4H chart as shown below.
+Wait for price to return to the 4H FVG on the 15 min and form a new FVG as shown below.
+Price consolidates before dropping in the London session. This is normal.
+
+
+
+
+Enter on the new FVG that is formed, in this example we are bearish so we short. Place your
+stop at the swing high and aim for a 2 or 3RR.
+
+
+
+
+This is an easy high probability trading model. Both the 4H and 15 min FVG should be in the
+same direction.
+
+Risk at most 1% per trade with this model.
+
+Don’t forget to backtest this model to build up your confidence!
+
+If you want to take this even further and truly master trading, here’s
+something special for you…
+Here’s How to Take Your Trading to the Next Level
+
+You now have a high-probability trading model to start using right away. But one strategy
+isn’t enough—you need a complete system that makes trading effortless and a mindset
+that eliminates hesitation, fear, and self-sabotage.
+
+That’s exactly what you’ll get inside the Iron Forged Trading Program—a step-by-step
+process to become a consistently profitable trader in just 3 months.
+
+Inside, you’ll learn:​
+ ✔ How to predict price movements with precision​
+ ✔ The 10 best trading models I personally trust​
+ ✔ How to reprogram your subconscious and fix your psychology—forever
+
+If you’re serious about mastering trading and breaking free from inconsistency, check out the
+full program here:
+
+🔗 Iron Forged Trading Program
+This could be the turning point in your trading journey. Let’s make it happen.
+

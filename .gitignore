@@ -1,0 +1,14 @@
+.env
+*.db
+*.db.bak*
+signals.db*
+bt_data/
+__pycache__/
+*.pyc
+web.log
+*.log
+backtest*_trades.csv
+planimg/
+img*/
+subs/
+.neon_url

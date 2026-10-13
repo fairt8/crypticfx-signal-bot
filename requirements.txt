@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pandas
+numpy
+requests
+yfinance
+python-dotenv
+psycopg[binary]

@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FVG Signal Bot</title><style>
+body{font-family:system-ui,sans-serif;background:#0f1419;color:#e6e6e6;margin:0;padding:16px}
+h1{font-size:20px;margin:0 0 4px}.muted{color:#8a99a8;font-size:13px}
+.cards{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.card{background:#1a2129;border-radius:8px;padding:10px 14px;min-width:90px}
+.card b{display:block;font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid #26303a;text-align:left}th{color:#8a99a8;position:sticky;top:0;background:#0f1419}
+.long{color:#3fb950}.short{color:#f85149}.tp{color:#3fb950;font-weight:600}.sl{color:#f85149;font-weight:600}.open{color:#d29922}
+.flag{background:#3d2e00;color:#d29922;padding:1px 5px;border-radius:4px;font-size:11px}
+.conf{display:inline-block;width:46px;text-align:right}button,select{background:#238636;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
+select{background:#1a2129}details{font-size:12px;color:#8a99a8}
+</style></head><body>
+<h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · crypto + forex</span></h1>
+<div class="muted" id="meta"></div>
+<div class="cards" id="cards"></div>
+<table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table>
+<div style="margin:8px 0">Strategy <select id="sg"><option value="">all</option><option value="FVG">FVG (live)</option><option value="FVG+TREND">FVG + 4H trend [EXP]</option><option value="CHK">Checklist [EXP]</option><option value="FVG-PLAN">FVG plan [EXP]</option></select>
+ Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
+ Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>expired</option></select>
+ <button onclick="scan()">Scan now</button></div>
+<table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table>
+<p class="muted">Educational tool, not financial advice. "Win prob." is calibrated on a 3-month backtest (≈25% average; break-even at 1:3 is 25% before fees). See backtest-report.md.</p>
+<script>
+const f=x=>x<1?x.toPrecision(5):x<50?x.toFixed(5):x.toFixed(2);
+const t=s=>new Date(s).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+let all=[];
+async function load(){
+ const st=await (await fetch('/api/stats')).json(); all=await (await fetch('/api/signals?days=30')).json();
+ document.getElementById('meta').textContent=`Last scan: ${st.last_scan||'—'} · crypto universe: ${st.universe_size} · open sessions: ${(st.sessions||[]).join(', ')||'none'} · priority FX: ${(st.forex_priority||[]).map(r=>r.pair+' '+r.bias).join(', ')||'—'} · Telegram ${st.telegram?'on':'off'} · AI ${st.ai?'on':'off'}`;
+ document.getElementById('cards').innerHTML=[['Signals (30d)',st.total],['TP hit',st.tp],['SL hit',st.sl],['Open',st.open],['Pending',st.pending],['Win rate',st.win_rate==null?'—':st.win_rate+'%'],['Net R',st.net_r]].map(([a,b])=>`<div class="card"><span class="muted">${a}</span><b>${b}</b></div>`).join('');
+ const bs=st.by_strategy||{};document.getElementById('strats').innerHTML=Object.entries(bs).map(([k,v])=>`<tr><td>${v.label}</td><td>${v.signals}</td><td>${v.closed}</td><td>${v.open}</td><td>${v.win_rate??'—'}</td><td>${v.gross_r}</td><td>${v.net_r}</td><td>${v.net_per_trade??'—'}</td></tr>`).join('');
+ render();}
+function render(){const sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;
+ document.getElementById('rows').innerHTML=all.filter(r=>(!sg||r.tags.includes(sg))&&(!mk||r.market==mk)&&(!ss||r.status==ss)).map(r=>`<tr><td>${r.id}</td><td>${t(r.confirm_time)}</td><td>${r.tags.map(x=>x=='FVG'?'FVG':`<span class="flag">${x} EXP</span>`).join(' ')}</td><td>${r.symbol} <span class="muted">${r.market}</span></td>
+ <td class="${r.direction}">${r.direction.toUpperCase()}</td><td><span class="conf">${r.confidence}%</span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
+ <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${f(r.tp)}</td><td class="${r.status}">${r.status}</td>
+ <td><details><summary>${r.reasons.length-1} factors</summary>${r.reasons.join('<br>')}</details></td></tr>`).join('')||'<tr><td colspan=11 class="muted">No signals yet</td></tr>';}
+document.getElementById('mk').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
+async function scan(){await fetch('/api/scan',{method:'POST'});load();}
+load();setInterval(load,60000);
+</script></body></html>
