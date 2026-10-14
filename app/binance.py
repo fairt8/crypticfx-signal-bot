@@ -5,7 +5,7 @@ S = requests.Session()
 if C.BINANCE_API_KEY: S.headers["X-MBX-APIKEY"] = C.BINANCE_API_KEY
 STABLE = {"USDC","FDUSD","TUSD","BUSD","DAI","USDP","EUR","AEUR","PAX","USDS","EURI","XUSD","USD1","BFUSD","RLUSD","PAXG","WBTC","WBETH","BNSOL"}
 def get(path, **p):
-    r = S.get(C.BINANCE_BASE + path, params=p, timeout=20); r.raise_for_status(); return r.json()
+    r = S.get(C.BINANCE_BASE + path, params=p, timeout=(5, 15)); r.raise_for_status(); return r.json()
 
 def top_usdt_symbols(n=C.CRYPTO_TOP_N):
     """Top n USDT spot pairs by quote volume over the last 48h (rolling 2d window)."""
@@ -48,7 +48,16 @@ def fetch_many(symbols, workers=None):
     def f(s):
         try: return s, fetch_pair(s)
         except Exception as e: return s, None
-    with ThreadPoolExecutor(workers) as ex:
-        for s, r in ex.map(f, symbols):
+    # bounded: no single symbol (or the whole batch) can block the scan; stragglers are abandoned
+    import time as _t
+    from concurrent.futures import wait
+    ex = ThreadPoolExecutor(workers); futs = [ex.submit(f, s) for s in symbols]
+    done, pending = wait(futs, timeout=C.FETCH_BUDGET_S)
+    for fu in done:
+        try:
+            s, r = fu.result()
             if r: out[s] = r
+        except Exception: pass
+    ex.shutdown(wait=False, cancel_futures=True)
+    if pending: print(f"[binance] fetch budget hit: {len(pending)} symbols skipped", flush=True)
     return out

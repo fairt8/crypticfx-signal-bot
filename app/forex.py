@@ -31,8 +31,12 @@ class YFinanceProvider:
     def ticker(self, p): return {"XAUUSD":"GC=F","XAGUSD":"SI=F"}.get(p, p+"=X")
     def _dl(self, tickers, interval, period):
         import yfinance as yf
-        d = yf.download(tickers, interval=interval, period=period, group_by="ticker", progress=False, auto_adjust=False, threads=True)
-        return d
+        from concurrent.futures import ThreadPoolExecutor
+        ex = ThreadPoolExecutor(1)
+        fu = ex.submit(yf.download, tickers, interval=interval, period=period, group_by="ticker", progress=False,
+                       auto_adjust=False, threads=True, timeout=15)
+        try: return fu.result(timeout=C.YF_BUDGET_S)   # hard cap: a hung Yahoo request can't block the scan
+        finally: ex.shutdown(wait=False, cancel_futures=True)
     def _norm(self, df):
         df = df.dropna(subset=["Open","High","Low","Close"]).rename(columns={"Open":"o","High":"h","Low":"l","Close":"c","Volume":"v"})
         df = df[["o","h","l","c","v"]].copy(); df.index = pd.to_datetime(df.index, utc=True)
