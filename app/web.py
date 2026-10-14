@@ -20,7 +20,7 @@ def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode
     sessions=scanner.STATE.get("sessions"), active_ccy=scanner.STATE.get("active_ccy"),
     forex_priority=[r for r in scanner.STATE.get("forex_rank", []) if r.get("priority")],
     strength={k: round(v,3) for k,v in scanner.STATE.get("strength", {}).items()},
-    universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled())
+    universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled(), telegram_token_shape=telegram.token_shape(), min_post_score=C.MIN_POST_SCORE)
 @app.post("/api/scan")
 def scan_now(): return [s["id"] for s in scanner.scan()]
 @app.get("/api/explain/{i}")

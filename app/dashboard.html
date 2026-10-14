@@ -10,7 +10,7 @@ th,td{padding:6px 8px;border-bottom:1px solid #26303a;text-align:left}th{color:#
 .conf{display:inline-block;width:46px;text-align:right}button,select{background:#238636;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
 select{background:#1a2129}details{font-size:12px;color:#8a99a8}
 </style></head><body>
-<h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · crypto + forex</span></h1>
+<h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · live: crypto FVG with setup score ≥ 70 only (older rows may include forex/CHK)</span></h1>
 <div class="muted" id="meta"></div>
 <div class="cards" id="cards"></div>
 <table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table>
@@ -18,7 +18,7 @@ select{background:#1a2129}details{font-size:12px;color:#8a99a8}
  Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
  Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>expired</option></select>
  <button onclick="scan()">Scan now</button></div>
-<table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>Target</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table>
+<table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>TP1 (1:1.5)</th><th>TP2 (1:3)</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table>
 <p class="muted">Educational tool, not financial advice. "Win prob." is calibrated on a 3-month backtest (≈25% average; break-even at 1:3 is 25% before fees). See backtest-report.md.</p>
 <script>
 const f=x=>x<1?x.toPrecision(5):x<50?x.toFixed(5):x.toFixed(2);
@@ -33,7 +33,7 @@ async function load(){
 function render(){const sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;
  document.getElementById('rows').innerHTML=all.filter(r=>(!sg||r.tags.includes(sg))&&(!mk||r.market==mk)&&(!ss||r.status==ss)).map(r=>`<tr><td>${r.id}</td><td>${t(r.confirm_time)}</td><td>${r.tags.map(x=>x=='FVG'?'FVG':`<span class="flag">${x} EXP</span>`).join(' ')}</td><td>${r.symbol} <span class="muted">${r.market}</span></td>
  <td class="${r.direction}">${r.direction.toUpperCase()}</td><td><span class="conf">${r.confidence}%</span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
- <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${f(r.tp)}</td><td class="${r.status}">${r.status}</td>
+ <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)}</td><td>${f(r.tp)}</td><td class="${r.status}">${r.status}</td>
  <td><details><summary>${r.reasons.length-1} factors</summary>${r.reasons.join('<br>')}</details></td></tr>`).join('')||'<tr><td colspan=11 class="muted">No signals yet</td></tr>';}
 document.getElementById('mk').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
 async function scan(){await fetch('/api/scan',{method:'POST'});load();}

@@ -13,7 +13,11 @@ BINANCE_API_KEY = E("BINANCE_API_KEY", "")
 CRYPTO_TOP_N = int(E("CRYPTO_TOP_N", "200"))
 FOREX_PROVIDER = E("FOREX_PROVIDER", "yfinance")  # yfinance | twelvedata
 TWELVEDATA_API_KEY = E("TWELVEDATA_API_KEY", "")
-TELEGRAM_BOT_TOKEN = E("TELEGRAM_BOT_TOKEN", "")
+def _clean_token(t):
+    t = "".join((t or "").split()).strip("'\"`")   # drop whitespace/newlines anywhere and surrounding quotes
+    if t.lower().startswith("bot") and ":" in t: t = t[3:]
+    return t
+TELEGRAM_BOT_TOKEN = _clean_token(E("TELEGRAM_BOT_TOKEN", ""))
 TELEGRAM_CHAT_ID = E("TELEGRAM_CHAT_ID", "")
 TELEGRAM_MODE = E("TELEGRAM_MODE", "auto")          # auto | webhook | polling
 TELEGRAM_WEBHOOK_SECRET = E("TELEGRAM_WEBHOOK_SECRET", "")
@@ -30,6 +34,7 @@ LTF_FREQ = {"5m":"5min","15m":"15min","1m":"1min"}[LTF]
 MAX_CONFIRM_AGE_BARS = int(E("MAX_CONFIRM_AGE_BARS", "2"))  # LTF FVG must have completed within the last N LTF bars (2x15m = 30 min)
 PENDING_EXPIRY = E("PENDING_EXPIRY", "48h")  # unfilled limit orders expire
 ENABLE_SCHEDULER = E("ENABLE_SCHEDULER", "1") == "1"
+MIN_POST_SCORE = int(E("MIN_POST_SCORE", "70"))  # live: only crypto FVG setups with raw setup score >= this are saved/posted (backtest v3)
 MIN_CONFIDENCE_TO_POST = int(E("MIN_CONFIDENCE_TO_POST", "0"))
 # --- Backtest-derived (backtest-report.md, 13 Oct 2026, 15m entry) ---
 MIN_STOP_PCT_CRYPTO = float(E("MIN_STOP_PCT_CRYPTO", "0.3"))  # skip crypto setups whose stop is closer than this % (fees dominate)

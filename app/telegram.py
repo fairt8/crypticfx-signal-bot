@@ -13,7 +13,8 @@ def fmt(s):
     else: entry_lbl = "Entry (limit)"
     flag = "" if s["in_session"] else "\n⚠️ Outside London/NY session"
     return (f"{head}\n#{s['id']} {e} {s['symbol']} ({s['market']})\nEst. win probability: {s['confidence']}% (needs >25% to break even at 1:3)\n"
-            f"{entry_lbl}: {fmt_price(s['entry'])}\nStop: {fmt_price(s['sl'])}\nTarget (1:{s['rr']:g}): {fmt_price(s['tp'])}"
+            f"{entry_lbl}: {fmt_price(s['entry'])}\nStop: {fmt_price(s['sl'])}"
+            + (f"\nTP1 (1:1.5): {fmt_price(s['tp1'])}" if s.get('tp1') else "") + f"\nTP2 (1:{s['rr']:g}): {fmt_price(s['tp'])}"
             f"\nStatus: {s['status']}{flag}\n" + "\n".join("• "+r for r in s["reasons"][1:]) + "\n\nNot financial advice.")
 def send(text, chat_id=None):
     if not enabled() or not (chat_id or C.TELEGRAM_CHAT_ID): return False
@@ -82,3 +83,16 @@ def start():
         MODE["state"] = f"webhook active elsewhere ({info['url'].split('/')[2]}); not polling here"; return
     if info.get("url"): requests.post(API("deleteWebhook"), timeout=20)
     MODE["state"] = "polling"; threading.Thread(target=poll_forever, daemon=True).start()
+
+_SHAPE = {}
+def token_shape():
+    """Safe diagnostic: never returns the token or any part of it."""
+    import re
+    t = C.TELEGRAM_BOT_TOKEN
+    if "res" not in _SHAPE or time.time() - _SHAPE.get("t", 0) > 300:
+        try: r = requests.get(API("getMe"), timeout=10).json(); res = dict(ok=r.get("ok"), description=r.get("description"))
+        except Exception as e: res = dict(ok=False, description=type(e).__name__)
+        _SHAPE.update(res=res, t=time.time())
+    return dict(length=len(t), bot_id_digits=len(t.split(":")[0]) if ":" in t else 0,
+                matches_regex=bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{30,}", t)),
+                getMe_ok=_SHAPE["res"]["ok"], getMe_description=_SHAPE["res"]["description"])

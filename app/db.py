@@ -84,7 +84,10 @@ def update(i, **kw):
     with conn() as c: c.execute(f"UPDATE signals SET {','.join(k+'=?' for k in kw)} WHERE id=?", (*kw.values(), i))
 def row(r):
     d = dict(r); d["reasons"] = json.loads(d["reasons"] or "[]"); d["tags"] = (d.get("tags") or "FVG").split(",")
-    d["net_r"] = net_r(d) if d.get("result_r") is not None else None; return d
+    d["net_r"] = net_r(d) if d.get("result_r") is not None else None
+    try: d["tp1"] = d["entry"] + (1.5 if d["direction"] == "long" else -1.5) * abs(d["entry"] - d["sl"])   # TP1 (1:1.5), display only; stats use tp (1:3)
+    except Exception: d["tp1"] = None
+    return d
 COST = {"crypto": 0.001, "forex": 0.0002, "metal": 0.0005}   # same round-trip cost assumptions as the backtests
 def net_r(r):
     if r["result_r"] is None: return None

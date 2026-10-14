@@ -66,3 +66,8 @@ Render sets `RENDER_EXTERNAL_URL` itself; the app uses it to register the Telegr
 
 ## Free hosting
 Render (free web service; it sleeps after 15 min idle, so use an external pinger such as UptimeRobot; the disk is ephemeral, so the SQLite history resets on redeploy unless you use a paid disk), Railway (trial credit), Fly.io (small free allowance; a volume keeps the SQLite file), or any always-on free VM (Oracle Cloud Always Free is the most robust for a 24/7 scanner). Start command: see `Procfile`.
+
+## Live posting filter (Oct 2026)
+Only **crypto FVG setups with raw setup score ≥ `MIN_POST_SCORE` (default 70, env-overridable)** are saved and posted (TP stays 1:3). Forex, CHK and sub-70 crypto FVG setups are dropped before saving, so dashboard/stats match Telegram. FVG+TREND / FVG-PLAN / FVG-D1 experimental tags still ride on qualifying signals. Backtest v3: ~29% win rate, ≈ +0.02R/trade (break-even; paper signals, not an edge).
+`TELEGRAM_BOT_TOKEN` is sanitized (whitespace/quotes/leading `bot` stripped); `/api/stats` → `telegram_token_shape` shows length/regex/getMe result only.
+- Every signal also shows **TP1 (1:1.5)** (entry ± 1.5×risk) next to **TP2 (1:3)** in Telegram, dashboard and API (`tp1`). Outcomes/stats are still tracked on TP2 only.

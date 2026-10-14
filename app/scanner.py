@@ -8,6 +8,10 @@ def crypto_universe():
         STATE["universe"] = binance.top_usdt_symbols(); STATE["universe_at"] = time.time()
     return STATE["universe"]
 
+def qualifies(sig):
+    """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
+    return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
+
 def scan(crypto=True, fx=True, post=True):
     found = []; cache = {}; watch = []
     if crypto:
@@ -45,6 +49,7 @@ def scan(crypto=True, fx=True, post=True):
                     if sig: found.append(sig)
         except Exception as e: STATE["errors"].append(f"forex: {e}")
     new = []
+    found = [g for g in found if qualifies(g)]   # filtered signals are not saved, so dashboard/stats match what is posted
     for sig in found:
         i = db.insert(sig)
         if i: new.append(db.get(i))
