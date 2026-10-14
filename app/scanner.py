@@ -10,6 +10,7 @@ def crypto_universe():
 
 def qualifies(sig):
     """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
+    if sig.get("strategy") == "MF-REJ": return True   # own forex strategy with its own filters (session, bias, range, 2/day)
     return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
 
 def scan(crypto=True, fx=True, post=True):
@@ -47,6 +48,17 @@ def scan(crypto=True, fx=True, post=True):
                 if C.ENABLE_CHK and "forex" in C.EXPERIMENTAL_MARKETS:
                     sig = strategy.analyze_chk(p, "forex", h4, h1)
                     if sig: found.append(sig)
+            if C.ENABLE_MF:
+                import pandas as pd
+                sp, ss = strategy.mf_strong_pair(st, data, pd.Timestamp.now(tz="UTC").floor("h"))   # session of the last closed 1H candle ≈ current hour
+                STATE["mf_strong_pair"] = dict(pair=sp, session=ss)
+                for p in list(strategy.MF_PAIRS) + ([sp] if sp else []):
+                    if p not in data: continue
+                    try:
+                        sig = strategy.analyze_mf(p, data[p][0], data[p][2], today_count=db.count_today(p, "MF-REJ"),
+                                                  strong_session=ss if p == sp else None)
+                        if sig: found.append(sig)
+                    except Exception as e: STATE["errors"].append(f"MF {p}: {e}")
         except Exception as e: STATE["errors"].append(f"forex: {e}")
     new = []
     found = [g for g in found if qualifies(g)]   # filtered signals are not saved, so dashboard/stats match what is posted

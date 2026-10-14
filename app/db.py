@@ -93,7 +93,7 @@ def net_r(r):
     if r["result_r"] is None: return None
     risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if r["symbol"] in ("XAUUSD","XAGUSD") else r["market"]
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
-STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "Varsity checklist [EXPERIMENTAL]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]"}
+STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "Varsity checklist [EXPERIMENTAL]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [EXPERIMENTAL – paper test]"}
 def by_strategy(days=60):
     rs = recent(days, 20000); out = {}
     for k, label in STRATS.items():
@@ -117,3 +117,8 @@ def release_lease(name="scheduler"):
             c.execute("UPDATE kv SET v=? WHERE k=? AND v LIKE ?" if not PG else "UPDATE kv SET v=%s WHERE k=%s AND v LIKE %s",
                       ("|1970-01-01T00:00:00+00:00", "lease:" + name, INSTANCE + "|%"))
     except Exception: pass
+def count_today(symbol, strategy):
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with conn() as c:
+        rs = c.execute("SELECT confirm_time FROM signals WHERE symbol=? AND strategy=?", (symbol, strategy)).fetchall()
+    return sum(1 for r in rs if str(r["confirm_time"]).startswith(day))

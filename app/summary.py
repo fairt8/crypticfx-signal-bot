@@ -3,7 +3,7 @@ import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
 from .telegram import fmt_price
-NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "Checklist [EXP]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]"}
+NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "Checklist [EXP]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [EXPERIMENTAL – paper test]"}
 def label(r): return " + ".join(NAMES.get(t, t) for t in r["tags"])
 def build(hours=2):
     now = datetime.now(timezone.utc); since = (now - timedelta(hours=hours)).isoformat()

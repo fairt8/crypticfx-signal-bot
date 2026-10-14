@@ -216,3 +216,67 @@ def daily_bias(d1, now=None, k=2):
     if H[-1] > H[-2] and L[-1] > L[-2]: return "long"
     if H[-1] < H[-2] and L[-1] < L[-2]: return "short"
     return ""
+
+
+# ---------------- EXPERIMENTAL: Market Fluidity zone rejection "MF-REJ" (backtest-report-mf.md, app/backtest_mf.py) ----------------
+MF_SESSIONS_UTC = {"Asian": (0, 7), "London": (7, 12), "NY": (12, 17)}   # UTC hours [start, end)
+# User's handwritten sheet: pair -> sessions it may signal in (edit here)
+MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"], "EURJPY": ["Asian", "London"],
+            "EURUSD": ["London"], "XAUUSD": ["London", "NY"]}
+MF_CONFIDENCE = 28   # backtest win rate of forex 1H MF-REJ at TP2 (1:3) = 28% (160 trades); TP1 (1:1.5) hit ~48%
+def mf_session(symbol, t):
+    h = t.hour
+    for s in MF_PAIRS.get(symbol, []):
+        a, b = MF_SESSIONS_UTC[s]
+        if a <= h < b: return s
+    return None
+def mf_current_session(t):
+    for s, (a, b) in MF_SESSIONS_UTC.items():
+        if a <= t.hour < b: return s
+    return None
+def mf_strong_pair(strength, universe, t):
+    """Dynamic 'strong pair' for the session open at t: strongest currency vs weakest (metals excluded), if that pair
+    exists in the universe and is not already in MF_PAIRS. Returns (pair, session) or (None, session)."""
+    sess = mf_current_session(t); cur = {k: v for k, v in (strength or {}).items() if k not in ("XAU", "XAG")}
+    if not sess or len(cur) < 2: return None, sess
+    hi = max(cur, key=cur.get); lo = min(cur, key=cur.get)
+    for p in (hi+lo, lo+hi):
+        if p in universe and p not in MF_PAIRS: return p, sess
+    return None, sess
+def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None):
+    """Evaluate the last closed 1H candle with the exact rules of backtest_mf.run (REJ, tf=1h, forex)."""
+    from . import mf as B
+    if (symbol not in MF_PAIRS and not strong_session) or h1 is None or len(h1) < 60 or len(h4) < 30 or today_count >= 2: return None
+    x = h1.reset_index(drop=True); i = len(x) - 1; ct = x.ct.iloc[i]
+    if (pd.Timestamp.now(tz="UTC") - ct) > pd.Timedelta(minutes=max_age_min): return None
+    sess = mf_session(symbol, ct)
+    if strong_session and mf_current_session(ct) == strong_session: sess = strong_session
+    if not sess: return None
+    d1 = B.rs(x[["t","o","h","l","c","v","ct"]], "1D"); bD, b4 = B.struct_bias(d1, 2), B.struct_bias(h4, 2)
+    bd, bb = B.at(d1.ct.values, bD, ct.to_datetime64()), B.at(h4.ct.values, b4, ct.to_datetime64())
+    if bd == 0 or bd != bb: return None
+    A = B.atr(x); R, S = B.zones(x); a = A[i]; r, s = R[i], S[i]
+    if not a > 0 or r is None or s is None: return None
+    O, H, L, Cl = x.o.values, x.h.values, x.l.values, x.c.values
+    fx = symbol not in ("XAUUSD", "XAGUSD"); rng = r[1] - s[0]
+    if rng < (40*B.pip(symbol) if fx else 3*a): return None
+    d = int(bd)
+    if d == 1: ok = L[i-1:i+1].min() <= s[1] and L[i-1:i+1].min() >= s[0]-0.5*a and Cl[i-1] < O[i-1] and Cl[i] > O[i] and Cl[i] > s[1]
+    else: ok = H[i-1:i+1].max() >= r[0] and H[i-1:i+1].max() <= r[1]+0.5*a and Cl[i-1] > O[i-1] and Cl[i] < O[i] and Cl[i] < r[0]
+    if not ok: return None
+    entry = float(Cl[i])   # next open ≈ last close (market order at the candle close)
+    sl = float((min(L[i-1:i+1].min(), s[0]) - 0.1*a) if d == 1 else (max(H[i-1:i+1].max(), r[1]) + 0.1*a))
+    risk = (entry - sl) * d
+    if risk <= 0 or risk > 3*a: return None   # sanity: stop on the right side and not absurdly wide
+    tp = entry + d*3*risk; dr = "long" if d == 1 else "short"; z = s if d == 1 else r
+    why = ["MF-REJ [EXPERIMENTAL – paper test]",
+           (f"Session: {sess} – strong pair of {sess} (strongest vs weakest currency, 24h strength)" if symbol not in MF_PAIRS
+            else f"Session: {sess} ({symbol} allowed in {', '.join(MF_PAIRS[symbol])})"),
+           f"Daily and 4H structure both {'up (HH+HL)' if d == 1 else 'down (LH+LL)'}",
+           f"Price pulled back into the {'support' if d == 1 else 'resistance'} zone {z[0]:.5g}–{z[1]:.5g}; 1H candle closed flipped {dr}",
+           f"Stop beyond the confirmation wick/zone; opposite zone {(r[0] if d == 1 else s[1]):.5g}",
+           "Backtest (forex, 1H): TP1 (1:1.5) hit ~48%, TP2 (1:3) ~28%; ≈ break-even. Stats tracked on TP2"]
+    return dict(symbol=symbol, market="forex", direction=dr, entry=entry, sl=sl, tp=float(tp), rr=3.0,
+        htf_top=float(z[1]), htf_bottom=float(z[0]), htf_time=str(x.t.iloc[i]), tap_time=str(x.t.iloc[i]), confirm_time=str(ct),
+        price_now=entry, in_session=True, confidence=MF_CONFIDENCE, setup_score=None, session=sess,
+        strategy="MF-REJ", tags=["MF-REJ"], experimental=1, status="open", filled_at=str(ct), reasons=why)
