@@ -200,3 +200,19 @@ def plan_variant(sig):
         tp=float(e + C.RR*risk if d == "long" else e - C.RR*risk),
         reasons=sig["reasons"] + [f"PLAN: stop at swing {'low' if d=='long' else 'high'} of the leg, 15m FVG {sig['tap_to_confirm_bars']} bars after tap. EXPERIMENTAL (backtest crypto −0.08R IS / +0.00R OOS net)"])
     return p
+
+
+# ---------------- EXPERIMENTAL: FVG-D1 tag (daily structure bias "B", backtest bt_d1) ----------------
+def daily_bias(d1, now=None, k=2):
+    """Daily market structure from confirmed pivots (k=2) on completed daily candles:
+    last two swing highs AND lows rising -> 'long'; both falling -> 'short'; else ''."""
+    if d1 is None or len(d1) < 60: return ""
+    now = now or pd.Timestamp.now(tz="UTC"); x = d1[d1.ct <= now].reset_index(drop=True)
+    H, L = [], []
+    for j in range(k, len(x)-k):
+        if x.h.iloc[j] == x.h.iloc[j-k:j+k+1].max(): H.append(x.h.iloc[j])
+        if x.l.iloc[j] == x.l.iloc[j-k:j+k+1].min(): L.append(x.l.iloc[j])
+    if len(H) < 2 or len(L) < 2: return ""
+    if H[-1] > H[-2] and L[-1] > L[-2]: return "long"
+    if H[-1] < H[-2] and L[-1] < L[-2]: return "short"
+    return ""

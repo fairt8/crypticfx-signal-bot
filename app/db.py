@@ -90,7 +90,7 @@ def net_r(r):
     if r["result_r"] is None: return None
     risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if r["symbol"] in ("XAUUSD","XAGUSD") else r["market"]
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
-STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "Varsity checklist [EXPERIMENTAL]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]"}
+STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "Varsity checklist [EXPERIMENTAL]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]"}
 def by_strategy(days=60):
     rs = recent(days, 20000); out = {}
     for k, label in STRATS.items():

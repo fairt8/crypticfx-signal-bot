@@ -39,4 +39,6 @@ EXPERIMENTAL_MARKETS = set(E("EXPERIMENTAL_MARKETS", "crypto").split(","))  # ba
 ENABLE_CHK = E("ENABLE_CHK", "1") == "1"
 CHK_CONFIDENCE = int(E("CHK_CONFIDENCE", "27"))  # observed CHK crypto win rate across the whole backtest (~27%: 22.4% IS, 30.7% OOS)
 FVG_STOP = E("FVG_STOP", "fvg")  # "fvg" = beyond the 3 FVG candles (video); "swing" = swing low/high of the leg (creator PDF plan)
+DAILY_REFRESH_HOURS = float(E("DAILY_REFRESH_HOURS", "6"))
+ENABLE_D1 = E("ENABLE_D1", "1") == "1"
 CALIB = {"crypto": (-1.3039, 0.00523), "forex": (-1.0018, 0.0)}  # refit 13 Oct on 15m FVG backtest (backtest-report-v2.md)

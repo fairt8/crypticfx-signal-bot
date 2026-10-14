@@ -31,6 +31,14 @@ def klines(symbol, interval, limit=300):
     now = pd.Timestamp.now(tz="UTC")
     return df[df.ct < now].reset_index(drop=True)  # closed candles only
 
+_DAILY = {}   # symbol -> (fetched_at, df); daily candles change slowly, refresh every DAILY_REFRESH_HOURS
+def daily(symbol):
+    import time as _t
+    hit = _DAILY.get(symbol)
+    if hit and _t.time() - hit[0] < C.DAILY_REFRESH_HOURS*3600: return hit[1]
+    df = klines(symbol, "1d", 200)[["t","h","l","c","ct"]]
+    _DAILY[symbol] = (_t.time(), df); return df
+
 def fetch_pair(symbol):
     return klines(symbol, "4h", 300), klines(symbol, C.LTF, 400), (klines(symbol, "1h", 300) if C.ENABLE_CHK else None)
 

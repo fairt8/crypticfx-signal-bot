@@ -6,8 +6,8 @@ def enabled(): return bool(C.TELEGRAM_BOT_TOKEN)
 def fmt_price(x): return f"{x:.6g}" if x < 1 else (f"{x:.5f}" if x < 50 else f"{x:.2f}")
 def fmt(s):
     e = "🟢 LONG" if s["direction"]=="long" else "🔴 SHORT"
-    tags = s.get("tags") or ["FVG"]; exp = s.get("experimental") or "FVG+TREND" in tags
-    names = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)"}
+    tags = s.get("tags") or ["FVG"]; exp = s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
+    names = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 [EXPERIMENTAL] daily bias"}
     head = ("[EXPERIMENTAL – paper test] " if exp else "") + "Strategy: " + " + ".join(names.get(t,t) for t in tags)
     if s.get("strategy") == "CHK": entry_lbl = "Entry (market, 1H close)"
     else: entry_lbl = "Entry (limit)"

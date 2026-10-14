@@ -15,6 +15,10 @@ def scan(crypto=True, fx=True, post=True):
         for s,(h4,m5,h1) in data.items():
             try:
                 sig = strategy.analyze(s, "crypto", h4, m5)
+                if sig and C.ENABLE_D1 and "crypto" in C.EXPERIMENTAL_MARKETS:
+                    b = strategy.daily_bias(binance.daily(s))   # only fetched when a setup exists (cached 6h)
+                    if b == sig["direction"]:
+                        sig["tags"] = sig["tags"] + ["FVG-D1"]; sig["reasons"].append(f"Daily structure bias {b} (FVG-D1 [EXPERIMENTAL])")
                 if sig: found.append(sig)
                 if sig and "crypto" in C.EXPERIMENTAL_MARKETS:
                     pv = strategy.plan_variant(sig)
