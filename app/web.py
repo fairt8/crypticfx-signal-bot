@@ -9,6 +9,8 @@ app = FastAPI(title="FVG Signal Bot")
 def _start():
     db.init(); telegram.start(); summary.start()
     if C.ENABLE_SCHEDULER: scanner.start()
+@app.on_event("shutdown")
+def _stop(): db.release_lease()
 @app.get("/", response_class=HTMLResponse)
 def home(): return (Path(__file__).parent / "dashboard.html").read_text()
 @app.get("/api/signals")

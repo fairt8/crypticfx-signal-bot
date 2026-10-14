@@ -106,3 +106,11 @@ def stats(days=30):
     return dict(total=len(rs), tp=w, sl=len(closed)-w, open=sum(r["status"]=="open" for r in rs),
         pending=sum(r["status"]=="pending" for r in rs), expired=sum(r["status"]=="expired" for r in rs),
         win_rate=round(100*w/len(closed),1) if closed else None, net_r=round(sum(r["result_r"] or 0 for r in closed),2))
+
+def release_lease(name="scheduler"):
+    """Give the lease up on shutdown so a redeployed instance can take over immediately."""
+    try:
+        with conn() as c:
+            c.execute("UPDATE kv SET v=? WHERE k=? AND v LIKE ?" if not PG else "UPDATE kv SET v=%s WHERE k=%s AND v LIKE %s",
+                      ("|1970-01-01T00:00:00+00:00", "lease:" + name, INSTANCE + "|%"))
+    except Exception: pass

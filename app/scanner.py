@@ -59,7 +59,7 @@ _started = False
 def loop():
     while True:
         try:
-            if db.lease("scheduler", ttl_s=C.SCAN_MINUTES*60*3):   # only one instance scans/posts, even if two overlap during a deploy
+            if db.lease("scheduler", ttl_s=C.SCAN_MINUTES*60+120):   # only one instance scans/posts, even if two overlap during a deploy
                 STATE["leader"] = True; scan()
             else: STATE["leader"] = False
         except Exception as e: STATE["errors"].append(str(e))
