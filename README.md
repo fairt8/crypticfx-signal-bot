@@ -61,7 +61,7 @@ Render sets `RENDER_EXTERNAL_URL` itself; the app uses it to register the Telegr
 **5. Stop the local bot** (box server on port 8000) once Render is live, or run it without `TELEGRAM_BOT_TOKEN`. Otherwise both instances scan and post to the same chat, since they use different databases.
 
 **Restart safety:** signals are unique per (symbol, confirm time, strategy) and posted only on first insert. The 2-hour summary time is stored in the DB, so restarts don't re-send it. A DB lease (`kv` table) makes only one instance scan and post; Telegram uses a webhook on Render, and locally it polls only if no webhook is set (or `TELEGRAM_MODE=polling`), behind a lease too.
-**Memory:** a full scan (200 crypto + 30 FX, plus 1H data for the checklist) peaked at ~246 MB RSS with 8 workers and ~242 MB with 3; the whole server process measured 263 MB peak, comfortably under Render's 512 MB. `SCAN_WORKERS=4` is a safe default.
+**Memory:** a full scan (200 crypto + 30 FX; 300 crypto at SCAN_WORKERS=4 measured 243 MB peak, ~236 s, plus 1H data for the checklist) peaked at ~246 MB RSS with 8 workers and ~242 MB with 3; the whole server process measured 263 MB peak, comfortably under Render's 512 MB. `SCAN_WORKERS=4` is a safe default.
 **Free-tier caveats:** Render free has a monthly instance-hour allowance (enough for one always-on service) and restarts on deploys. Neon free has limited monthly compute and storage and autosuspends idle computes. Scanning every 15 minutes (aligned to the 15m entry chart) lets it idle between scans. yfinance may be rate-limited from cloud IPs.
 
 ## Free hosting

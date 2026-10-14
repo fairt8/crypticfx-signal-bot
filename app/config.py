@@ -10,7 +10,7 @@ DB_PATH = E("DB_PATH", str(BASE / "signals.db"))
 DATABASE_URL = E("DATABASE_URL", "")  # Postgres (e.g. Neon) when set; SQLite fallback otherwise
 BINANCE_BASE = E("BINANCE_BASE", "https://data-api.binance.vision")  # public market-data mirror; api.binance.com also works
 BINANCE_API_KEY = E("BINANCE_API_KEY", "")
-CRYPTO_TOP_N = int(E("CRYPTO_TOP_N", "200"))
+CRYPTO_TOP_N = int(E("CRYPTO_TOP_N", "300"))
 FOREX_PROVIDER = E("FOREX_PROVIDER", "yfinance")  # yfinance | twelvedata
 TWELVEDATA_API_KEY = E("TWELVEDATA_API_KEY", "")
 def _clean_token(t):
