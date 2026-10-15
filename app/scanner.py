@@ -113,7 +113,8 @@ def loop():
         try:
             if db.lease("scheduler", ttl_s=TTL()):   # only one instance scans/posts, even if two overlap during a deploy
                 STATE["leader"] = True; _run_once()
-            else: STATE["leader"] = False
+            else:
+                STATE["leader"] = False; time.sleep(60); continue   # follower: retry soon so a redeploy takes over within ~1 min
         except BaseException as e:
             STATE["errors"].append(f"loop: {e}"); print(f"[loop] {e!r}", flush=True)
         time.sleep(max(30, C.SCAN_MINUTES*60 - (time.time()-t)))
