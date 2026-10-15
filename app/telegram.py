@@ -13,10 +13,12 @@ def fmt(s):
     else: entry_lbl = "Entry (limit)"
     if s.get("strategy") == "MF-REJ": head = "MF-REJ [EXPERIMENTAL – paper test] Strategy: Market Fluidity zone rejection (1H)"
     flag = "" if s["in_session"] else "\n⚠️ Outside London/NY session"
-    return (f"{head}\n#{s['id']} {e} {s['symbol']} ({s['market']})\nEst. win probability: {s['confidence']}% (needs >25% to break even at 1:3)\n"
-            f"{entry_lbl}: {fmt_price(s['entry'])}\nStop: {fmt_price(s['sl'])}"
-            + (f"\nTP1 (1:1.5): {fmt_price(s['tp1'])}" if s.get('tp1') else "") + f"\nTP2 (1:{s['rr']:g}): {fmt_price(s['tp'])}"
-            f"\nStatus: {s['status']}{flag}\n" + "\n".join("• "+r for r in s["reasons"][1:]) + "\n\nNot financial advice.")
+    return (f"{head}\n#{s['id']} {e} {s['symbol']} ({s['market']})\nEst. win probability: {s['confidence']}% " + ("" if s.get("strategy") == "MF-REJ" else "(needs >25% to break even at 1:3)") + "\n"
+            + f"{entry_lbl}: {fmt_price(s['entry'])}\nStop: {fmt_price(s['sl'])}"
+            + ((f"\nTP (next S/R zone): {fmt_price(s['tp'])} ({s['rr']:.2f}R)" + (f"\nTP1 (1:1.5) reference: {fmt_price(s['tp1'])}" if s.get('tp1') else ""))
+               if s.get("strategy") == "MF-REJ" else
+               (f"\nTP1 (1:1.5): {fmt_price(s['tp1'])}" if s.get('tp1') else "") + f"\nTP2 (1:{s['rr']:g}): {fmt_price(s['tp'])}")
+            + f"\nStatus: {s['status']}{flag}\n" + "\n".join("• "+r for r in s["reasons"][1:]) + "\n\nNot financial advice.")
 def send(text, chat_id=None):
     if not enabled() or not (chat_id or C.TELEGRAM_CHAT_ID): return False
     r = requests.post(API("sendMessage"), json=dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, text=text[:4000]), timeout=20)

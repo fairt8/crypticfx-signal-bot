@@ -223,7 +223,7 @@ MF_SESSIONS_UTC = {"Asian": (0, 7), "London": (7, 12), "NY": (12, 17)}   # UTC h
 # User's handwritten sheet: pair -> sessions it may signal in (edit here)
 MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"], "EURJPY": ["Asian", "London"],
             "EURUSD": ["London"], "XAUUSD": ["London", "NY"]}
-MF_CONFIDENCE = 28   # backtest win rate of forex 1H MF-REJ at TP2 (1:3) = 28% (160 trades); TP1 (1:1.5) hit ~48%
+MF_CONFIDENCE = 55   # backtest win rate of strong-zone MF-REJ at the next-zone TP (65 trades, 2y 1H)
 def mf_session(symbol, t):
     h = t.hour
     for s in MF_PAIRS.get(symbol, []):
@@ -243,8 +243,10 @@ def mf_strong_pair(strength, universe, t):
     for p in (hi+lo, lo+hi):
         if p in universe and p not in MF_PAIRS: return p, sess
     return None, sess
-def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None):
-    """Evaluate the last closed 1H candle with the exact rules of backtest_mf.run (REJ, tf=1h, forex)."""
+def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None, h4_long=None):
+    """MF-REJ, strong body-based S/R (bt_mfs/run.py best variant: body Daily+4H bias, zone = body swing levels clustered
+    within 0.25 ATR, strong = 2+ touches OR 4H/Daily level, 1H flip-close entry at market, stop = far zone edge + 0.5 ATR,
+    TP = next strong opposing zone, only if >= 0.5R)."""
     from . import mf as B
     if (symbol not in MF_PAIRS and not strong_session) or h1 is None or len(h1) < 60 or len(h4) < 30 or today_count >= 2: return None
     x = h1.reset_index(drop=True); i = len(x) - 1; ct = x.ct.iloc[i]
@@ -252,31 +254,55 @@ def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=Non
     sess = mf_session(symbol, ct)
     if strong_session and mf_current_session(ct) == strong_session: sess = strong_session
     if not sess: return None
-    d1 = B.rs(x[["t","o","h","l","c","v","ct"]], "1D"); bD, b4 = B.struct_bias(d1, 2), B.struct_bias(h4, 2)
-    bd, bb = B.at(d1.ct.values, bD, ct.to_datetime64()), B.at(h4.ct.values, b4, ct.to_datetime64())
-    if bd == 0 or bd != bb: return None
-    A = B.atr(x); R, S = B.zones(x); a = A[i]; r, s = R[i], S[i]
-    if not a > 0 or r is None or s is None: return None
     O, H, L, Cl = x.o.values, x.h.values, x.l.values, x.c.values
-    fx = symbol not in ("XAUUSD", "XAGUSD"); rng = r[1] - s[0]
-    if rng < (40*B.pip(symbol) if fx else 3*a): return None
-    d = int(bd)
-    if d == 1: ok = L[i-1:i+1].min() <= s[1] and L[i-1:i+1].min() >= s[0]-0.5*a and Cl[i-1] < O[i-1] and Cl[i] > O[i] and Cl[i] > s[1]
-    else: ok = H[i-1:i+1].max() >= r[0] and H[i-1:i+1].max() <= r[1]+0.5*a and Cl[i-1] > O[i-1] and Cl[i] < O[i] and Cl[i] < r[0]
-    if not ok: return None
-    entry = float(Cl[i])   # next open ≈ last close (market order at the candle close)
-    sl = float((min(L[i-1:i+1].min(), s[0]) - 0.1*a) if d == 1 else (max(H[i-1:i+1].max(), r[1]) + 0.1*a))
-    risk = (entry - sl) * d
-    if risk <= 0 or risk > 3*a: return None   # sanity: stop on the right side and not absurdly wide
-    tp = entry + d*3*risk; dr = "long" if d == 1 else "short"; z = s if d == 1 else r
+    flip_up = Cl[i-1] < O[i-1] and Cl[i] > O[i]; flip_dn = Cl[i-1] > O[i-1] and Cl[i] < O[i]
+    if not (flip_up or flip_dn): return None
+    d = 1 if flip_up else -1
+    hh = h4_long if h4_long is not None and len(h4_long) >= len(h4) else h4
+    t = ct.to_datetime64()
+    hh = hh[hh.ct.values <= t].reset_index(drop=True)
+    d1 = B.rs(hh[["t","o","h","l","c","v","ct"]], "1D")
+    bD, b4 = B.struct_bias(B.body(d1), 2), B.struct_bias(B.body(hh), 2)
+    bd, bb = B.at(d1.ct.values, bD, t), B.at(hh.ct.values, b4, t)
+    if bd == 0 or bd != bb or int(bd) != d: return None
+    A = B.atr(x); a = A[i]
+    if not a > 0: return None
+    lt, lp = B.pivots(x, 3); (t4, p4), (td, pdd) = B.pivots(hh, 2), B.pivots(d1, 2)
+    LV = lp[(lt <= t) & (lt > t - np.timedelta64(30, "D"))]
+    HV = np.concatenate([p4[(t4 <= t) & (t4 > t - np.timedelta64(120, "D"))], pdd[(td <= t) & (td > t - np.timedelta64(365, "D"))]])
+    tol = 0.25*a; allv = np.concatenate([LV, HV])
+    if d == 1:
+        lo = min(L[i-1], L[i]); cand = allv[(allv >= lo-tol) & (allv < Cl[i])]; cand = -np.sort(-cand)
+    else:
+        hi = max(H[i-1], H[i]); cand = allv[(allv <= hi+tol) & (allv > Cl[i])]; cand = np.sort(cand)
+    if not len(cand): return None
+    zb, zt, n = B.cluster(LV, cand[0], tol); hb, htp, hn = B.cluster(HV, cand[0], tol)
+    if hn == 0: zlo, zhi = (zb, zt) if n else (cand[0], cand[0])
+    else: zlo, zhi = (min(zb, hb), max(zt, htp)) if n else (hb, htp)
+    if not (n >= 2 or hn > 0): return None   # strong zone only
+    if d == 1:
+        if not (lo <= zhi+0.05*a and Cl[i] > zhi and min(O[i-1], Cl[i-1], O[i]) >= zlo-tol): return None
+    else:
+        if not (hi >= zlo-0.05*a and Cl[i] < zlo and max(O[i-1], Cl[i-1], O[i]) <= zhi+tol): return None
+    entry = float(Cl[i])   # market at next open ≈ this close
+    sl = float(zlo - 0.5*a if d == 1 else zhi + 0.5*a); risk = (entry - sl)*d
+    if risk <= 0: return None
+    opp = np.sort(allv[allv > entry]) if d == 1 else -np.sort(-allv[allv < entry]); tz = None
+    for p in opp:
+        if B.cluster(LV, p, tol)[2] >= 2 or B.cluster(HV, p, tol)[2] >= 1:
+            tz = B.cluster(allv, p, tol)[0 if d == 1 else 1]; break
+    if tz is None: return None
+    rr = float((tz - entry)*d/risk)
+    if rr < 0.5: return None
+    dr = "long" if d == 1 else "short"
     why = ["MF-REJ [EXPERIMENTAL – paper test]",
            (f"Session: {sess} – strong pair of {sess} (strongest vs weakest currency, 24h strength)" if symbol not in MF_PAIRS
             else f"Session: {sess} ({symbol} allowed in {', '.join(MF_PAIRS[symbol])})"),
-           f"Daily and 4H structure both {'up (HH+HL)' if d == 1 else 'down (LH+LL)'}",
-           f"Price pulled back into the {'support' if d == 1 else 'resistance'} zone {z[0]:.5g}–{z[1]:.5g}; 1H candle closed flipped {dr}",
-           f"Stop beyond the confirmation wick/zone; opposite zone {(r[0] if d == 1 else s[1]):.5g}",
-           "Backtest (forex, 1H): TP1 (1:1.5) hit ~48%, TP2 (1:3) ~28%; ≈ break-even. Stats tracked on TP2"]
-    return dict(symbol=symbol, market="forex", direction=dr, entry=entry, sl=sl, tp=float(tp), rr=3.0,
-        htf_top=float(z[1]), htf_bottom=float(z[0]), htf_time=str(x.t.iloc[i]), tap_time=str(x.t.iloc[i]), confirm_time=str(ct),
+           f"Daily and 4H body structure both {'up (HH+HL)' if d == 1 else 'down (LH+LL)'}",
+           f"Strong {'support' if d == 1 else 'resistance'} zone {zlo:.5g}–{zhi:.5g} (body levels; {n} 1H touches{', 4H/Daily level' if hn else ''}); 1H candle closed flipped {dr}",
+           f"Stop beyond the far zone edge + 0.5 ATR; TP = next strong {'resistance' if d == 1 else 'support'} zone {tz:.5g} ({rr:.2f}R)",
+           "Backtest (2y, 1H, strong zones, next-zone TP): ~55% win, ≈ break-even (-0.04R/trade). Stats tracked on the next-zone TP"]
+    return dict(symbol=symbol, market="forex", direction=dr, entry=entry, sl=sl, tp=float(tz), rr=round(rr, 2),
+        htf_top=float(zhi), htf_bottom=float(zlo), htf_time=str(x.t.iloc[i]), tap_time=str(x.t.iloc[i]), confirm_time=str(ct),
         price_now=entry, in_session=True, confidence=MF_CONFIDENCE, setup_score=None, session=sess,
         strategy="MF-REJ", tags=["MF-REJ"], experimental=1, status="open", filled_at=str(ct), reasons=why)

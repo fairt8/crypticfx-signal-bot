@@ -55,13 +55,14 @@ def scan(crypto=True, fx=True, post=True, gen=None):
             if C.ENABLE_MF:
               try:
                   import pandas as pd
+                  from . import mf
                   sp, ss = strategy.mf_strong_pair(st, data, pd.Timestamp.now(tz="UTC").floor("h"))   # session of the last closed 1H candle ≈ current hour
                   STATE["mf_strong_pair"] = dict(pair=sp, session=ss)
                   for p in list(strategy.MF_PAIRS) + ([sp] if sp else []):
                       if p not in data: continue
                       try:
                           sig = strategy.analyze_mf(p, data[p][0], data[p][2], today_count=db.count_today(p, "MF-REJ"),
-                                                    strong_session=ss if p == sp else None)
+                                                    strong_session=ss if p == sp else None, h4_long=mf.htf_h4(p, data[p][0]))
                           if sig: found.append(sig)
                       except Exception as e: STATE["errors"].append(f"MF {p}: {e}")
               except Exception as e: STATE["errors"].append(f"MF: {e}")

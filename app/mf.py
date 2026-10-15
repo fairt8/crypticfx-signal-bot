@@ -32,3 +32,37 @@ def zones(x):
             if L[j] <= L[i-6:i+1].min(): s = (L[j], min(O[j], Cl[j]))
         R[i], S[i] = r, s
     return R, S
+
+# ---- Strong body-based S/R (bt_mfs/run.py, best variant: body bias, T2|HTF, pad 0.5, next-zone TP >= 0.5R) ----
+import time as _time
+def body(x):
+    y = x.copy(); y["h"] = np.maximum(x.o, x.c); y["l"] = np.minimum(x.o, x.c); return y
+def pivots(x, k):
+    """Body swing extremes -> (confirm_time, level) arrays, highs+lows mixed (S/R flip allowed)."""
+    bh = np.maximum(x.o.values, x.c.values); bl = np.minimum(x.o.values, x.c.values); ct = x.ct.values; T = []; P = []
+    for j in range(k, len(x)-k):
+        if bh[j] == bh[j-k:j+k+1].max(): T.append(ct[j+k]); P.append(bh[j])
+        if bl[j] == bl[j-k:j+k+1].min(): T.append(ct[j+k]); P.append(bl[j])
+    if not T: return np.array([], dtype="datetime64[ns]"), np.array([])
+    o = np.argsort(T, kind="stable"); return np.array(T)[o], np.array(P)[o]
+def cluster(levels, anchor, tol):
+    c = levels[np.abs(levels-anchor) <= tol]
+    return (c.min(), c.max(), len(c)) if len(c) else (anchor, anchor, 0)
+
+_HTF = {}   # symbol -> (fetched_at, h4)   longer 1H history (1y) for 4H/Daily levels; refreshed every 6h
+def htf_h4(symbol, fallback):
+    now = _time.time(); c = _HTF.get(symbol)
+    if c and now - c[0] < 6*3600: return c[1]
+    try:
+        from . import forex
+        pv = forex.provider()
+        if getattr(pv, "name", "") != "yfinance": return fallback
+        raw = pv._dl([pv.ticker(symbol)], "1h", "1y")   # time-capped download (YF_BUDGET_S)
+        a = pv._norm(raw[pv.ticker(symbol)] if pv.ticker(symbol) in raw.columns.get_level_values(0) else raw)
+        h4 = a.resample("4h", origin="epoch").agg(AGG).dropna(); h4["t"] = h4.index; h4["ct"] = h4.t + pd.Timedelta("4h")
+        h4 = h4.reset_index(drop=True); h4 = h4[h4.ct <= pd.Timestamp.now(tz="UTC")].reset_index(drop=True)
+        if len(h4) < len(fallback): return fallback
+        _HTF[symbol] = (now, h4); return h4
+    except Exception:
+        _HTF[symbol] = (now - 5*3600, c[1] if c else fallback)   # retry in ~1h
+        return c[1] if c else fallback

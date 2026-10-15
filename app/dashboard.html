@@ -35,7 +35,7 @@ async function load(){
 function render(){const sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;
  document.getElementById('rows').innerHTML=all.filter(r=>(!sg||r.tags.includes(sg))&&(!mk||r.market==mk)&&(!ss||r.status==ss)).map(r=>`<tr><td>${r.id}</td><td>${t(r.confirm_time)}</td><td>${r.tags.map(x=>x=='FVG'?'FVG':`<span class="flag">${x} EXP</span>`).join(' ')}</td><td>${r.symbol} <span class="muted">${r.market}</span></td>
  <td class="${r.direction}">${r.direction.toUpperCase()}</td><td><span class="conf">${r.confidence}%</span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
- <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)}</td><td>${f(r.tp)}</td><td class="${r.status}">${r.status}</td>
+ <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)+(r.strategy=="MF-REJ"?' <span class="muted">ref</span>':"")}</td><td>${r.strategy=="MF-REJ"?`${f(r.tp)} <span class="muted">TP (next S/R zone) ${(+r.rr).toFixed(2)}R</span>`:f(r.tp)}</td><td class="${r.status}">${r.status}</td>
  <td><details><summary>${r.reasons.length-1} factors</summary>${r.reasons.join('<br>')}</details></td></tr>`).join('')||'<tr><td colspan=11 class="muted">No signals yet</td></tr>';}
 document.getElementById('mk').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
 async function scan(){await fetch('/api/scan',{method:'POST'});load();}
