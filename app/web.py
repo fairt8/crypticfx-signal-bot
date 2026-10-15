@@ -3,11 +3,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pathlib import Path
-from . import config as C, db, scanner, telegram, ai, summary
+from . import config as C, db, scanner, telegram, ai, summary, don20
 app = FastAPI(title="FVG Signal Bot")
 @app.on_event("startup")
 def _start():
-    db.init(); telegram.start(); summary.start()
+    db.init(); don20.init(); telegram.start(); summary.start()
+    don20.start(scanner.crypto_universe, lambda: bool(scanner.STATE.get("leader")))
     if C.ENABLE_SCHEDULER: scanner.start()
 @app.on_event("shutdown")
 def _stop(): db.release_lease()
@@ -21,7 +22,9 @@ def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode
     forex_priority=[r for r in scanner.STATE.get("forex_rank", []) if r.get("priority")],
     strength={k: round(v,3) for k,v in scanner.STATE.get("strength", {}).items()},
     universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled(), telegram_token_shape=telegram.token_shape(), min_post_score=C.MIN_POST_SCORE, mf_strong_pair=scanner.STATE.get("mf_strong_pair"),
-    instance=db.INSTANCE, scheduler_lease=db.kv_get("lease:scheduler"), scan_started=scanner.STATE.get("scan_started"), scan_errors=scanner.STATE.get("errors", [])[-5:])
+    instance=db.INSTANCE, scheduler_lease=db.kv_get("lease:scheduler"), scan_started=scanner.STATE.get("scan_started"), scan_errors=scanner.STATE.get("errors", [])[-5:], don20=dict(last_run=don20.STATE["last_run"], last_result=don20.STATE["last_result"], errors=don20.STATE["errors"][-5:]))
+@app.get("/api/don20")
+def don20_positions(): return don20.all_positions()
 @app.post("/api/scan")
 def scan_now(): return [s["id"] for s in scanner.scan()]
 @app.get("/api/explain/{i}")

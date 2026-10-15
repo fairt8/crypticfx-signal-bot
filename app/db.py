@@ -102,6 +102,9 @@ def by_strategy(days=60):
         out[k] = dict(label=label, signals=len(sub), closed=len(cl), open=sum(r["status"] in ("open","pending") for r in sub),
             win_rate=round(100*w/len(cl),1) if cl else None, gross_r=round(sum(r["result_r"] for r in cl),2),
             net_r=round(sum(nets),2), net_per_trade=round(sum(nets)/len(cl),3) if cl else None)
+    try:
+        from . import don20; out["DON20"] = don20.summary()
+    except Exception as e: out["DON20"] = dict(label="DON20 [EXPERIMENTAL – paper test]", signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
     return out
 def stats(days=30):
     rs = recent(days, 10000); closed = [r for r in rs if r["status"] in ("tp","sl")]

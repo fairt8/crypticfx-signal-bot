@@ -51,3 +51,4 @@ DAILY_REFRESH_HOURS = float(E("DAILY_REFRESH_HOURS", "6"))
 ENABLE_D1 = E("ENABLE_D1", "1") == "1"
 CALIB = {"crypto": (-1.3039, 0.00523), "forex": (-1.0018, 0.0)}  # refit 13 Oct on 15m FVG backtest (backtest-report-v2.md)
 ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [EXPERIMENTAL] forex zone rejection (strategy.MF_PAIRS)
+ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [EXPERIMENTAL] daily Donchian-20 crypto breakout

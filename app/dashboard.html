@@ -14,6 +14,7 @@ select{background:#1a2129}details{font-size:12px;color:#8a99a8}
 <div class="muted" id="meta"></div>
 <div class="cards" id="cards"></div>
 <table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table>
+<h3>DON20 open positions [EXPERIMENTAL – paper test]</h3><table style="max-width:900px"><thead><tr><th>#</th><th>Coin</th><th>Side</th><th>Opened</th><th>Entry</th><th>Initial stop</th><th>Trailing stop</th><th>Status</th><th>R (net)</th></tr></thead><tbody id="don20"></tbody></table>
 <div style="margin:8px 0">Strategy <select id="sg"><option value="">all</option><option value="FVG">FVG (live)</option><option value="FVG+TREND">FVG + 4H trend [EXP]</option><option value="CHK">Checklist [EXP]</option><option value="FVG-PLAN">FVG plan [EXP]</option><option value="FVG-D1">FVG-D1 [EXP]</option><option value="MF-REJ">MF-REJ [EXP]</option></select>
  Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
  Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>expired</option></select>
@@ -28,6 +29,7 @@ async function load(){
  const st=await (await fetch('/api/stats')).json(); all=await (await fetch('/api/signals?days=30')).json();
  document.getElementById('meta').textContent=`Last scan: ${st.last_scan||'—'} · crypto universe: ${st.universe_size} · open sessions: ${(st.sessions||[]).join(', ')||'none'} · priority FX: ${(st.forex_priority||[]).map(r=>r.pair+' '+r.bias).join(', ')||'—'} · Telegram ${st.telegram?'on':'off'} · AI ${st.ai?'on':'off'}`;
  document.getElementById('cards').innerHTML=[['Signals (30d)',st.total],['TP hit',st.tp],['SL hit',st.sl],['Open',st.open],['Pending',st.pending],['Win rate',st.win_rate==null?'—':st.win_rate+'%'],['Net R',st.net_r]].map(([a,b])=>`<div class="card"><span class="muted">${a}</span><b>${b}</b></div>`).join('');
+ try{const dn=await (await fetch('/api/don20')).json();document.getElementById('don20').innerHTML=dn.filter(p=>p.status=='open').concat(dn.filter(p=>p.status!='open').slice(0,10)).map(p=>`<tr><td>${p.id}</td><td>${p.symbol}</td><td>${p.direction}</td><td>${(p.opened_at||'').slice(0,16)}</td><td>${+p.entry.toPrecision(6)}</td><td>${+p.init_stop.toPrecision(6)}</td><td>${+p.stop.toPrecision(6)}</td><td>${p.status}</td><td>${p.net_r??'—'}</td></tr>`).join('')||'<tr><td colspan=9 class=muted>No DON20 positions yet</td></tr>';}catch(e){}
  const bs=st.by_strategy||{};document.getElementById('strats').innerHTML=Object.entries(bs).map(([k,v])=>`<tr><td>${v.label}</td><td>${v.signals}</td><td>${v.closed}</td><td>${v.open}</td><td>${v.win_rate??'—'}</td><td>${v.gross_r}</td><td>${v.net_r}</td><td>${v.net_per_trade??'—'}</td></tr>`).join('');
  render();}
 function render(){const sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;

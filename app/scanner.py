@@ -82,6 +82,10 @@ def scan(crypto=True, fx=True, post=True, gen=None):
     STATE["watch"] = watch
     try: STATE["outcomes"] = outcomes.update_all(cache)
     except Exception as e: STATE["errors"].append(f"outcomes: {e}")
+    if C.ENABLE_DON20:
+        try:
+            from . import don20; don20.check_stops(cache, post=post)
+        except Exception as e: STATE["errors"].append(f"don20 stops: {e}")
     STATE["last_scan"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["errors"] = STATE["errors"][-20:]
     STATE["last_counts"] = dict(scanned_crypto=len([k for k in cache if k.endswith("USDT")]),
         scanned_forex=len([k for k in cache if not k.endswith("USDT")]), candidates=len(found), new=len(new))

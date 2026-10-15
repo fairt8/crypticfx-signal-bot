@@ -3,7 +3,7 @@ import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
 from .telegram import fmt_price
-NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "Checklist [EXP]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [EXPERIMENTAL – paper test]"}
+NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "Checklist [EXP]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [EXPERIMENTAL – paper test]", "DON20": "DON20 [EXPERIMENTAL – paper test]"}
 def label(r): return " + ".join(NAMES.get(t, t) for t in r["tags"])
 def build(hours=2):
     now = datetime.now(timezone.utc); since = (now - timedelta(hours=hours)).isoformat()
@@ -28,7 +28,9 @@ def build(hours=2):
         lines.append(f"• #{r['id']} {r['symbol']} {r['direction']} {r['status']} ({label(r)})")
     if len(op) > 15: lines.append(f"… and {len(op)-15} more (see /signals)")
     bs = db.by_strategy()
-    lines.append("\nLive stats (60d, net after costs): " + "; ".join(f"{NAMES[k]}: {v['closed']} closed, win {v['win_rate'] if v['win_rate'] is not None else '—'}%, {v['net_r']}R" for k, v in bs.items()))
+    lines.append("\nLive stats (60d, net after costs): " + "; ".join(f"{NAMES[k]}: {v['closed']} closed, win {v['win_rate'] if v['win_rate'] is not None else '—'}%, {v['net_r']}R" for k, v in bs.items() if k != "DON20"))
+    d = bs.get("DON20") or {}
+    lines.append(f"DON20 [EXPERIMENTAL – paper test]: {d.get('open',0)} open, {d.get('closed',0)} closed, net {d.get('net_r',0)}R")
     return "\n".join(lines)
 def due(every_h):
     last = db.kv_get("last_summary_at")

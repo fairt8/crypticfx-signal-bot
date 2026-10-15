@@ -45,7 +45,9 @@ def handle(text, chat):
         rs = db.recent(d)[:30]
         return "\n".join(f"#{r['id']} {r['symbol']} {r['direction']} {r['confidence']}% → {r['status']}" for r in rs) or "No history."
     if cmd == "/stats":
-        return "\n".join(f"{v['label']}: {v['closed']} closed, win {v['win_rate']}%, net {v['net_r']}R ({v['open']} open)" for v in db.by_strategy().values())
+        bs = db.by_strategy(); d = bs.get("DON20", {})
+        return "\n".join(f"{v['label']}: {v['closed']} closed, win {v['win_rate']}%, net {v['net_r']}R ({v['open']} open)" for k, v in bs.items() if k != "DON20") + \
+            f"\nDON20 [EXPERIMENTAL – paper test]: {d.get('open',0)} open, {d.get('closed',0)} closed, win {d.get('win_rate')}%, net {d.get('net_r',0)}R" 
     if cmd == "/explain":
         s = db.get(int(arg)) if arg.isdigit() else None
         return ai.explain(s) if s else "Usage: /explain <id>"
