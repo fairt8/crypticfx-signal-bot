@@ -17,7 +17,7 @@ def main():
         th = threading.Thread(target=lambda: don20.daily_run(scanner.crypto_universe(), post=post), daemon=True); th.start()
         th.join(C.SCAN_WATCHDOG_S); db.kv_set("don20_last_day", day)
     if post and telegram.enabled() and summary.due(2):
-        ok = telegram.send(summary.build(2))
+        ok = telegram.send(summary.build(2), html=True)
         if ok: db.kv_set("last_summary_at", datetime.now(timezone.utc).isoformat())
         print(f"[run_once] summary sent={ok}", flush=True)
     print(f"[run_once] total {time.time()-t0:.0f}s counts={scanner.STATE.get('last_counts')} errors={scanner.STATE['errors'][:5]}", flush=True)

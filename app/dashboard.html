@@ -1,25 +1,37 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FVG Signal Bot</title><style>
-body{font-family:system-ui,sans-serif;background:#0f1419;color:#e6e6e6;margin:0;padding:16px}
-h1{font-size:20px;margin:0 0 4px}.muted{color:#8a99a8;font-size:13px}
-.cards{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.card{background:#1a2129;border-radius:8px;padding:10px 14px;min-width:90px}
-.card b{display:block;font-size:20px}table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:6px 8px;border-bottom:1px solid #26303a;text-align:left}th{color:#8a99a8;position:sticky;top:0;background:#0f1419}
-.long{color:#3fb950}.short{color:#f85149}.tp{color:#3fb950;font-weight:600}.sl{color:#f85149;font-weight:600}.open{color:#d29922}
-.flag{background:#3d2e00;color:#d29922;padding:1px 5px;border-radius:4px;font-size:11px}
-.conf{display:inline-block;width:46px;text-align:right}button,select{background:#238636;color:#fff;border:0;border-radius:6px;padding:6px 10px;cursor:pointer}
-select{background:#1a2129}details{font-size:12px;color:#8a99a8}
+<title>FVG Signal Bot</title><style>:root{--bg:#0b0f17;--panel:#131a26;--panel2:#1a2333;--line:#243046;--txt:#e7ecf3;--mut:#8b98ad;--grn:#22c55e;--red:#ef4444;--amb:#f59e0b;--blu:#3b82f6}
+*{box-sizing:border-box}body{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(1200px 600px at 10% -10%,#16213a,var(--bg));color:var(--txt);margin:0;padding:20px;line-height:1.45}
+h1{font-size:22px;margin:0 0 6px;font-weight:700}h1 .muted{display:block;font-weight:400;margin-top:4px}h3{margin:22px 0 8px;font-size:16px}
+.muted{color:var(--mut);font-size:13px}#meta{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:14px 0}
+.card{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:0 4px 18px #0005}
+.card b{display:block;font-size:24px;margin-top:4px}.pos{color:var(--grn)!important}.neg{color:var(--red)!important}
+.tw{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:8px 0 16px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--mut);position:sticky;top:0;background:var(--panel2);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.04em}
+tbody tr:hover{background:#1c2638}td:last-child{white-space:normal}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px}
+.badge.long{background:#22c55e22;color:var(--grn);border:1px solid #22c55e66}.badge.short{background:#ef444422;color:var(--red);border:1px solid #ef444466}
+.long{color:var(--grn)}.short{color:var(--red)}
+.pill{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#ffffff12;color:var(--mut)}
+.pill.tp{background:#22c55e26;color:var(--grn)}.pill.sl{background:#ef444426;color:var(--red)}.pill.open{background:#f59e0b26;color:var(--amb)}.pill.pending{background:#3b82f626;color:#93c5fd}
+.flag{background:#f59e0b22;color:var(--amb);padding:2px 6px;border-radius:5px;font-size:11px}
+.conf{display:inline-block;width:40px;text-align:right}.cbar{display:inline-block;width:60px;height:6px;background:#ffffff14;border-radius:4px;margin-left:6px;vertical-align:middle;overflow:hidden}.cbar i{display:block;height:100%;background:linear-gradient(90deg,var(--amb),var(--grn))}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0;color:var(--mut);font-size:13px}
+button,select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}button{background:var(--blu);border:0;cursor:pointer;font-weight:600}button:hover{filter:brightness(1.1)}
+details{font-size:12px;color:var(--mut)}summary{cursor:pointer}
+@media(max-width:640px){body{padding:12px}h1{font-size:18px}.card b{font-size:20px}th,td{padding:7px 8px}}
 </style></head><body>
 <h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · live: crypto FVG with setup score ≥ 70 only (older rows may include forex/CHK)</span></h1>
 <div class="muted" id="meta"></div>
 <div class="cards" id="cards"></div>
-<table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table>
-<h3>DON20 open positions [EXPERIMENTAL – paper test]</h3><table style="max-width:900px"><thead><tr><th>#</th><th>Coin</th><th>Side</th><th>Opened</th><th>Entry</th><th>Initial stop</th><th>Trailing stop</th><th>Status</th><th>R (net)</th></tr></thead><tbody id="don20"></tbody></table>
-<div style="margin:8px 0">Strategy <select id="sg"><option value="">all</option><option value="FVG">FVG (live)</option><option value="FVG+TREND">FVG + 4H trend [EXP]</option><option value="CHK">Checklist [EXP]</option><option value="FVG-PLAN">FVG plan [EXP]</option><option value="FVG-D1">FVG-D1 [EXP]</option><option value="MF-REJ">MF-REJ [EXP]</option></select>
+<div class="tw"><table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table></div>
+<h3>DON20 open positions [EXPERIMENTAL – paper test]</h3><div class="tw"><table style="max-width:900px"><thead><tr><th>#</th><th>Coin</th><th>Side</th><th>Opened</th><th>Entry</th><th>Initial stop</th><th>Trailing stop</th><th>Status</th><th>R (net)</th></tr></thead><tbody id="don20"></tbody></table></div>
+<div class="filters">Strategy <select id="sg"><option value="">all</option><option value="FVG">FVG (live)</option><option value="FVG+TREND">FVG + 4H trend [EXP]</option><option value="CHK">Checklist [EXP]</option><option value="FVG-PLAN">FVG plan [EXP]</option><option value="FVG-D1">FVG-D1 [EXP]</option><option value="MF-REJ">MF-REJ [EXP]</option></select>
  Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
  Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>expired</option></select>
  <button onclick="scan()">Scan now</button></div>
-<table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>TP1 (1:1.5)</th><th>TP2 (1:3)</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table>
+<div class="tw"><table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>TP1 (1:1.5)</th><th>TP2 (1:3)</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table></div>
 <p class="muted">Educational tool, not financial advice. "Win prob." is calibrated on a 3-month backtest (≈25% average; break-even at 1:3 is 25% before fees). See backtest-report.md.</p>
 <script>
 const f=x=>x<1?x.toPrecision(5):x<50?x.toFixed(5):x.toFixed(2);
@@ -28,14 +40,14 @@ let all=[];
 async function load(){
  const st=await (await fetch('/api/stats')).json(); all=await (await fetch('/api/signals?days=30')).json();
  document.getElementById('meta').textContent=`Last scan: ${st.last_scan||'—'} · crypto universe: ${st.universe_size} · open sessions: ${(st.sessions||[]).join(', ')||'none'} · priority FX: ${(st.forex_priority||[]).map(r=>r.pair+' '+r.bias).join(', ')||'—'} · Telegram ${st.telegram?'on':'off'} · AI ${st.ai?'on':'off'}`;
- document.getElementById('cards').innerHTML=[['Signals (30d)',st.total],['TP hit',st.tp],['SL hit',st.sl],['Open',st.open],['Pending',st.pending],['Win rate',st.win_rate==null?'—':st.win_rate+'%'],['Net R',st.net_r]].map(([a,b])=>`<div class="card"><span class="muted">${a}</span><b>${b}</b></div>`).join('');
- try{const dn=await (await fetch('/api/don20')).json();document.getElementById('don20').innerHTML=dn.filter(p=>p.status=='open').concat(dn.filter(p=>p.status!='open').slice(0,10)).map(p=>`<tr><td>${p.id}</td><td>${p.symbol}</td><td>${p.direction}</td><td>${(p.opened_at||'').slice(0,16)}</td><td>${+p.entry.toPrecision(6)}</td><td>${+p.init_stop.toPrecision(6)}</td><td>${+p.stop.toPrecision(6)}</td><td>${p.status}</td><td>${p.net_r??'—'}</td></tr>`).join('')||'<tr><td colspan=9 class=muted>No DON20 positions yet</td></tr>';}catch(e){}
- const bs=st.by_strategy||{};document.getElementById('strats').innerHTML=Object.entries(bs).map(([k,v])=>`<tr><td>${v.label}</td><td>${v.signals}</td><td>${v.closed}</td><td>${v.open}</td><td>${v.win_rate??'—'}</td><td>${v.gross_r}</td><td>${v.net_r}</td><td>${v.net_per_trade??'—'}</td></tr>`).join('');
+ document.getElementById('cards').innerHTML=[['Signals (30d)',st.total],['TP hit',st.tp],['SL hit',st.sl],['Open',st.open],['Pending',st.pending],['Win rate',st.win_rate==null?'—':st.win_rate+'%'],['Net R',st.net_r]].map(([a,b])=>`<div class="card"><span class="muted">${a}</span><b class="${a=='TP hit'?'pos':a=='SL hit'?'neg':a=='Net R'?(b>0?'pos':b<0?'neg':''):''}">${b}</b></div>`).join('');
+ try{const dn=await (await fetch('/api/don20')).json();document.getElementById('don20').innerHTML=dn.filter(p=>p.status=='open').concat(dn.filter(p=>p.status!='open').slice(0,10)).map(p=>`<tr><td>${p.id}</td><td>${p.symbol}</td><td>${p.direction}</td><td>${(p.opened_at||'').slice(0,16)}</td><td>${+p.entry.toPrecision(6)}</td><td>${+p.init_stop.toPrecision(6)}</td><td>${+p.stop.toPrecision(6)}</td><td>${p.status}</td><td class="${p.net_r>0?'pos':p.net_r<0?'neg':''}">${p.net_r??'—'}</td></tr>`).join('')||'<tr><td colspan=9 class=muted>No DON20 positions yet</td></tr>';}catch(e){}
+ const bs=st.by_strategy||{};document.getElementById('strats').innerHTML=Object.entries(bs).map(([k,v])=>`<tr><td>${v.label}</td><td>${v.signals}</td><td>${v.closed}</td><td>${v.open}</td><td>${v.win_rate??'—'}</td><td>${v.gross_r}</td><td class="${v.net_r>0?'pos':v.net_r<0?'neg':''}">${v.net_r}</td><td class="${v.net_per_trade>0?'pos':v.net_per_trade<0?'neg':''}">${v.net_per_trade??'—'}</td></tr>`).join('');
  render();}
 function render(){const sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;
  document.getElementById('rows').innerHTML=all.filter(r=>(!sg||r.tags.includes(sg))&&(!mk||r.market==mk)&&(!ss||r.status==ss)).map(r=>`<tr><td>${r.id}</td><td>${t(r.confirm_time)}</td><td>${r.tags.map(x=>x=='FVG'?'FVG':`<span class="flag">${x} EXP</span>`).join(' ')}</td><td>${r.symbol} <span class="muted">${r.market}</span></td>
- <td class="${r.direction}">${r.direction.toUpperCase()}</td><td><span class="conf">${r.confidence}%</span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
- <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)+(r.strategy=="MF-REJ"?' <span class="muted">ref</span>':"")}</td><td>${r.strategy=="MF-REJ"?`${f(r.tp)} <span class="muted">TP (next S/R zone) ${(+r.rr).toFixed(2)}R</span>`:f(r.tp)}</td><td class="${r.status}">${r.status}</td>
+ <td><span class="badge ${r.direction}">${r.direction=="long"?"▲":"▼"} ${r.direction.toUpperCase()}</span></td><td><span class="conf">${r.confidence}%</span><span class="cbar"><i style="width:${Math.min(100,r.confidence)}%"></i></span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
+ <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)+(r.strategy=="MF-REJ"?' <span class="muted">ref</span>':"")}</td><td>${r.strategy=="MF-REJ"?`${f(r.tp)} <span class="muted">TP (next S/R zone) ${(+r.rr).toFixed(2)}R</span>`:f(r.tp)}</td><td><span class="pill ${r.status}">${r.status.toUpperCase()}</span></td>
  <td><details><summary>${r.reasons.length-1} factors</summary>${r.reasons.join('<br>')}</details></td></tr>`).join('')||'<tr><td colspan=11 class="muted">No signals yet</td></tr>';}
 document.getElementById('mk').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
 async function scan(){await fetch('/api/scan',{method:'POST'});load();}

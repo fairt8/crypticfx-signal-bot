@@ -4,24 +4,53 @@ from . import config as C, db, ai
 API = lambda m: f"https://api.telegram.org/bot{C.TELEGRAM_BOT_TOKEN}/{m}"
 def enabled(): return bool(C.TELEGRAM_BOT_TOKEN)
 def fmt_price(x): return f"{x:.6g}" if x < 1 else (f"{x:.5f}" if x < 50 else f"{x:.2f}")
+import html as _h
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+def esc(x): return _h.escape(str(x), quote=False)
+def code(x): return f"<code>{esc(fmt_price(x))}</code>"
+def bar(p, n=10):
+    k = max(0, min(n, round((p or 0) / 100 * n))); return "▰" * k + "▱" * (n - k)
+def wat(ts=None):
+    try: d = _dt.fromisoformat(str(ts).replace("Z", "+00:00")) if ts else _dt.now(_tz.utc)
+    except Exception: d = _dt.now(_tz.utc)
+    if d.tzinfo is None: d = d.replace(tzinfo=_tz.utc)
+    return d.astimezone(_tz(_td(hours=1))).strftime("%d %b %H:%M") + " WAT"
+NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"MF-REJ · Market Fluidity zone rejection (1H)"}
 def fmt(s):
-    e = "🟢 LONG" if s["direction"]=="long" else "🔴 SHORT"
-    tags = s.get("tags") or ["FVG"]; exp = s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
-    names = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 [EXPERIMENTAL] daily bias","MF-REJ":"MF-REJ (Market Fluidity zone rejection, 1H)"}
-    head = ("[EXPERIMENTAL – paper test] " if exp else "") + "Strategy: " + " + ".join(names.get(t,t) for t in tags)
-    if s.get("strategy") in ("CHK", "MF-REJ"): entry_lbl = "Entry (market, 1H close)"
-    else: entry_lbl = "Entry (limit)"
-    if s.get("strategy") == "MF-REJ": head = "MF-REJ [EXPERIMENTAL – paper test] Strategy: Market Fluidity zone rejection (1H)"
-    flag = "" if s["in_session"] else "\n⚠️ Outside London/NY session"
-    return (f"{head}\n#{s['id']} {e} {s['symbol']} ({s['market']})\nEst. win probability: {s['confidence']}% " + ("" if s.get("strategy") == "MF-REJ" else "(needs >25% to break even at 1:3)") + "\n"
-            + f"{entry_lbl}: {fmt_price(s['entry'])}\nStop: {fmt_price(s['sl'])}"
-            + ((f"\nTP (next S/R zone): {fmt_price(s['tp'])} ({s['rr']:.2f}R)" + (f"\nTP1 (1:1.5) reference: {fmt_price(s['tp1'])}" if s.get('tp1') else ""))
-               if s.get("strategy") == "MF-REJ" else
-               (f"\nTP1 (1:1.5): {fmt_price(s['tp1'])}" if s.get('tp1') else "") + f"\nTP2 (1:{s['rr']:g}): {fmt_price(s['tp'])}")
-            + f"\nStatus: {s['status']}{flag}\n" + "\n".join("• "+r for r in s["reasons"][1:]) + "\n\nNot financial advice.")
-def send(text, chat_id=None):
+    e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"
+    tags = s.get("tags") or ["FVG"]; mf = s.get("strategy") == "MF-REJ"
+    exp = mf or s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
+    strat = NAMES["MF-REJ"] if mf else " + ".join(NAMES.get(t, t) for t in tags)
+    entry_lbl = "Entry (market, 1H close)" if s.get("strategy") in ("CHK", "MF-REJ") else "Entry (limit)"
+    L = []
+    if exp: L.append("🧪 <b>EXPERIMENTAL – paper test</b>")
+    L += [f"🏷 <b>{esc(strat)}</b>", "", f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", ""]
+    L.append(f"📍 <b>{esc(entry_lbl)}:</b> {code(s['entry'])}")
+    L.append(f"🛑 <b>Stop:</b> {code(s['sl'])}")
+    if mf:
+        L.append(f"🎯 <b>TP (next S/R zone):</b> {code(s['tp'])}  <i>({s['rr']:.2f}R)</i>")
+        if s.get("tp1"): L.append(f"🎯 <b>TP1 (1:1.5) reference:</b> {code(s['tp1'])}")
+    else:
+        if s.get("tp1"): L.append(f"🎯 <b>TP1 (1:1.5):</b> {code(s['tp1'])}")
+        L.append(f"🎯 <b>TP2 (1:{s['rr']:g}):</b> {code(s['tp'])}")
+    c = s["confidence"]
+    L += ["", f"📊 <b>Est. win probability:</b> {esc(c)}%", bar(c) + ("" if mf else "  <i>(needs &gt;25% to break even at 1:3)</i>")]
+    L.append(f"📌 <b>Status:</b> {esc(s['status'])}")
+    if not s.get("in_session"): L.append("⚠️ <i>Outside London/NY session</i>")
+    L.append(f"⏰ {wat(s.get('confirm_time') or s.get('created_at'))}")
+    rs = (s.get("reasons") or [])[1:]
+    if rs: L += ["", "<b>Why:</b>"] + ["• " + esc(r) for r in rs]
+    L += ["", "<i>Not financial advice.</i>"]
+    return "\n".join(L)
+def send(text, chat_id=None, html=False):
     if not enabled() or not (chat_id or C.TELEGRAM_CHAT_ID): return False
-    r = requests.post(API("sendMessage"), json=dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, text=text[:4000]), timeout=20)
+    body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, text=text[:4000], disable_web_page_preview=True)
+    if html: body["parse_mode"] = "HTML"
+    r = requests.post(API("sendMessage"), json=body, timeout=20)
+    if not r.ok and html:   # never lose a signal over markup: fall back to plain text
+        import re as _re
+        body.pop("parse_mode"); body["text"] = _h.unescape(_re.sub(r"<[^>]+>", "", text))[:4000]
+        r = requests.post(API("sendMessage"), json=body, timeout=20)
     return r.ok
 def post_group(rows):
     rows = [r for r in rows if r["confidence"] >= C.MIN_CONFIDENCE_TO_POST]
@@ -29,12 +58,12 @@ def post_group(rows):
     rows.sort(key=lambda r: r["strategy"] != "FVG")   # live FVG first
     text = fmt(rows[0])
     for r in rows[1:]:
-        text += (f"\n\n[EXPERIMENTAL – paper test] Same setup, {r['strategy']} levels (#{r['id']}): entry {fmt_price(r['entry'])}, "
-                 f"stop {fmt_price(r['sl'])}, target {fmt_price(r['tp'])}")
-    if send(text):
+        text += (f"\n\n━━━━━━━━━━━━\n🧪 <b>EXPERIMENTAL – paper test</b>\nSame setup, <b>{esc(r['strategy'])}</b> levels (#{r['id']}):\n"
+                 f"📍 Entry {code(r['entry'])}\n🛑 Stop {code(r['sl'])}\n🎯 Target {code(r['tp'])}")
+    if send(text, html=True):
         for r in rows: db.update(r["id"], posted=1)
 def post_signal(s):
-    if s["confidence"] >= C.MIN_CONFIDENCE_TO_POST and send(fmt(s)): db.update(s["id"], posted=1)
+    if s["confidence"] >= C.MIN_CONFIDENCE_TO_POST and send(fmt(s), html=True): db.update(s["id"], posted=1)
 HELP = "/signals – open/pending signals\n/history [days] – last results (default 7)\n/stats – 30-day stats\n/explain <id> – AI explanation\n/ask <question> – ask AI about recent signals"
 def handle(text, chat):
     parts = text.split(maxsplit=1); cmd = parts[0].split("@")[0].lower(); arg = parts[1] if len(parts) > 1 else ""
@@ -58,7 +87,9 @@ def handle(text, chat):
 def process_update(u):
     m = u.get("message") or {}
     if m.get("text","").startswith("/"):
-        try: send(handle(m["text"], m["chat"]["id"]), m["chat"]["id"])
+        try:
+            out = handle(m["text"], m["chat"]["id"])
+            send(out, m["chat"]["id"], html=m["text"].split()[0].split("@")[0].lower() == "/signals")
         except Exception as e: send(f"Error: {e}", m["chat"]["id"])
 def poll_forever():
     off = 0
