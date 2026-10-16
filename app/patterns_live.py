@@ -198,7 +198,7 @@ def pat_series(name, d, market):
     return d, a, entries(d, a, st, mode, stop_mode)
 
 
-def brk_series(d, market, look=250):
+def brk_series(d, market, look=250, levels="both"):
     """BRK: fresh 4H close beyond a strong horizontal body S/R level (2+ body-pivot touches within 0.25 ATR, mf.py zone logic)
     or beyond a pattern neckline/trendline. Filters: volume > 20-bar avg (skipped when the feed has no volume, e.g. Yahoo FX),
     close in the outer 30% of the candle. Entry: crypto immediate (breakout close), forex retest (touch + confirming close).
@@ -217,7 +217,7 @@ def brk_series(d, market, look=250):
         if bh[j] == bh[j-K:j+K+1].max(): piv.append((j+K, bh[j]))
         if bl[j] == bl[j-K:j+K+1].min(): piv.append((j+K, bl[j]))
     piv.sort(); pt = np.array([p[0] for p in piv]); pp = np.array([p[1] for p in piv]); setups = []
-    for i in range(30, len(d)):
+    for i in range(30 if levels in ("both", "horizontal") else len(d), len(d)):
         if np.isnan(a[i]) or not len(pt): continue
         m = (pt <= i-1) & (pt > i-1-look); lv = pp[m]
         if len(lv) < 2: continue
@@ -231,16 +231,18 @@ def brk_series(d, market, look=250):
             z = cl.max() if sg == 1 else cl.min()
             if sg*(Cl[i]-z) <= 0: continue
             setups.append(("HORIZ_LEVEL", "long" if sg == 1 else "short", lambda x, v=z: v, z-sg*1e9, 0.0, ("HL", i, sg), i-1))
-    setups += pattern_setups(d, a, BRK_NAMES)
+    if levels in ("both", "pattern"): setups += pattern_setups(d, a, BRK_NAMES)
     E = entries(d, a, setups, mode, "lvl", brk_filter=filt)
     best = {}
     for e in E: best.setdefault((e["k"], e["dir"]), e)   # one BRK per bar/direction
     return d, a, sorted(best.values(), key=lambda e: e["k"])
 
 # ---------------------------------------------------------------- live
-BRK_CONF = {"crypto": 27, "forex": 25}   # backtest win% at the tracked 1:3 target (backtest-report-brk.md)
+BRK_CONF = {"crypto": 27, "forex": 25}   # all levels; pattern-only crypto below   # backtest win% at the tracked 1:3 target (backtest-report-brk.md)
 BRK_NOTE = {"crypto": "2y 4H backtest: 17,264 trades, 27% win at 1:3, IS +0.05R / OOS -0.02R per trade net (≈ break-even)",
             "forex": "2y 4H backtest: 2,893 trades, 25% win at 1:3, IS -0.06R / OOS -0.09R per trade net (losing)"}
+BRK_PAT_CONF, BRK_PAT_NOTE = 27, ("2y 4H backtest, crypto neckline/trendline breaks only: 1:3 IS n=869 26.8% win +0.034R, OOS n=989 27.9% +0.069R; "
+    "1:1.5 IS n=870 44.4% +0.071R, OOS n=1001 43.2% +0.032R (net). Tracked: 1:3 (higher pooled net R)")
 STALE = pd.Timedelta("4h30min")   # only the last closed 4H bar is evaluated
 def _sig(strategy, symbol, market, d, a, e, R, conf, note, why):
     k = e["k"]; sd = 1 if e["dir"] == "long" else -1; entry = float(e["entry"]); sl = float(e["sl"]); risk = abs(entry-sl)
@@ -268,14 +270,16 @@ def live_pat(symbol, market, h4, now=None, names=None):
             out.append(_sig(nm, symbol, market, d, a, e, v[5], v[6], v[7], why))
     return out
 def live_brk(symbol, market, h4, now=None):
+    from . import config as C
     now = now or pd.Timestamp.now(tz="UTC")
-    if h4 is None or len(h4) < 60: return []
-    d, a, E = brk_series(h4, market); out = []
+    if h4 is None or len(h4) < 60 or market not in C.BRK_MARKETS: return []
+    d, a, E = brk_series(h4, market, levels=C.BRK_LEVELS); out = []
+    pat_only = C.BRK_LEVELS == "pattern" and market == "crypto"
     for e in E:
         if not _fresh(d, e["k"], now): continue
         if market == "crypto" and abs(e["entry"]-e["sl"])/e["entry"] < 0.003: continue
         what = "strong horizontal S/R (2+ body touches)" if e["pat"] == "HORIZ_LEVEL" else f"{NICE.get(e['pat'], e['pat'])} neckline/trendline"
         why = [f"4H close {'above' if e['dir']=='long' else 'below'} {what} at {e['level']:.6g}, volume above 20-bar avg, close in outer 30% of candle",
                "Entry: " + ("immediate (breakout close)" if market == "crypto" else "retest of the level + confirming 4H close"), "Stop: level ∓ 0.5 ATR"]
-        out.append(_sig("BRK", symbol, market, d, a, e, 3.0, BRK_CONF[market], BRK_NOTE[market], why))
+        out.append(_sig("BRK", symbol, market, d, a, e, 3.0, BRK_PAT_CONF if pat_only else BRK_CONF[market], BRK_PAT_NOTE if pat_only else BRK_NOTE[market], why))
     return out[-1:]

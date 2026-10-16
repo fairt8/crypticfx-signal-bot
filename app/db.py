@@ -98,7 +98,7 @@ def net_r(r):
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
 STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "⭐ CHK Varsity checklist [PRIMARY]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [experimental – collecting live results]",
           "PAT-WEDGE": "PAT-WEDGE 4H wedge retest, 1:3 [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE 4H FX triple top/bottom retest, 1:1.5 [EXPERIMENTAL – paper]",
-          "PAT-CUP": "PAT-CUP 4H cup & handle retest, 1:3 [EXPERIMENTAL – paper]", "BRK": "BRK 4H breakout, 1:3 [EXPERIMENTAL – paper]"}
+          "PAT-CUP": "PAT-CUP 4H cup & handle retest, 1:3 [EXPERIMENTAL – paper]", "BRK": "BRK 4H crypto neckline/trendline breakout, 1:3 [EXPERIMENTAL – paper]"}
 def by_strategy(days=60):
     rs = recent(days, 20000); out = {}
     for k, label in STRATS.items():

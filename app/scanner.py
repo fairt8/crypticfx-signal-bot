@@ -23,7 +23,7 @@ def patterns_for(data, market, found, budget_end):
             if h4 is None or not len(h4): continue
             key = (s, str(h4.t.iloc[-1]))
             if key in _PAT_DONE: continue   # this closed 4H bar was already evaluated (Render loop); DB unique key dedupes anyway
-            if C.ENABLE_PAT: sigs += PL.live_pat(s, market, h4)
+            if C.ENABLE_PAT: sigs += PL.live_pat(s, market, h4, names=C.PAT_ENABLED or {"__none__"})
             if C.ENABLE_BRK: sigs += PL.live_brk(s, market, h4)
             for g in sigs: got.setdefault(g["strategy"], []).append(g)
             _PAT_DONE.add(key)

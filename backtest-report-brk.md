@@ -25,3 +25,8 @@ BRK split: crypto pattern-neckline breaks IS +0.071R / OOS +0.032R at 1:1.5 (n 8
 **Verdict:** BRK does not have an edge (crypto ≈ break-even at 1:3, forex losing). Once overlapping signals are deduped to one per coin/bar, PAT-WEDGE is slightly negative in IS and PAT-CUP is negative in OOS. Only PAT-TRIPLE (FX) stays positive in both halves, and its sample is small. All four run as EXPERIMENTAL – paper only.
 
 Replay of the live functions bar-by-bar, Jul–Sep 2026 (54 symbols, 300-bar 4H window): BRK 2,380, PAT-WEDGE 228, PAT-TRIPLE 15, PAT-CUP 7 signals (before the live cap of 3 per strategy per scan). Cost about 0.065 s per symbol per scan.
+
+## Live setting (16 Oct 2026)
+BRK limited to crypto neckline/trendline breaks (`BRK_MARKETS=crypto`, `BRK_LEVELS=pattern`). 1:3: IS n=869, 26.8% win, +0.034R; OOS n=989, 27.9%, +0.069R. 1:1.5: IS n=870, 44.4%, +0.071R; OOS n=1001, 43.2%, +0.032R. Neither target is better in both halves, so 1:3 is tracked (higher pooled net R: +0.053 vs +0.050). Confidence 27%.
+
+Update 16 Oct 2026: live = PAT-TRIPLE + BRK (crypto neckline/trendline only). PAT-WEDGE and PAT-CUP are off by default (`PAT_ENABLED=PAT-TRIPLE`).

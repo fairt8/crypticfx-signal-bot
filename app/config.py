@@ -56,6 +56,9 @@ PTP_STRATS = set(filter(None, E("PTP_STRATS", "FVG,CHK").split(",")))  # tracked
 ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [EXPERIMENTAL] forex zone rejection (strategy.MF_PAIRS)
 ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [EXPERIMENTAL] daily Donchian-20 crypto breakout
 ENABLE_PAT = E("ENABLE_PAT", "1") == "1"   # PAT-WEDGE / PAT-TRIPLE / PAT-CUP [EXPERIMENTAL – paper] 4H pattern retests (app/patterns_live.py)
-ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [EXPERIMENTAL – paper] 4H S/R + pattern breakout
+ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [EXPERIMENTAL – paper] 4H crypto neckline/trendline breakout (see BRK_MARKETS/BRK_LEVELS)
+PAT_ENABLED = set(x for x in E("PAT_ENABLED", "PAT-TRIPLE").split(",") if x)   # live PAT-* strategies; PAT-WEDGE / PAT-CUP off by default (failed one backtest half)
+BRK_MARKETS = set(E("BRK_MARKETS", "crypto").split(","))   # BRK markets (forex BRK lost in backtest: -0.06/-0.09R)
+BRK_LEVELS = E("BRK_LEVELS", "pattern")   # pattern = neckline/trendline breaks only; horizontal | both re-enable S/R-level breaks (lost in backtest)
 PAT_MAX_PER_SCAN = int(E("PAT_MAX_PER_SCAN", "3"))   # max new posts per PAT-*/BRK strategy per scan (no bursts)
 PAT_FX = ["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD","EURJPY","GBPJPY","XAUUSD"]   # PAT-TRIPLE / BRK forex universe (backtested)

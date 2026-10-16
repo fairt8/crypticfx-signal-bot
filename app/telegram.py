@@ -16,7 +16,7 @@ def wat(ts=None):
     if d.tzinfo is None: d = d.replace(tzinfo=_tz.utc)
     return d.astimezone(_tz(_td(hours=1))).strftime("%d %b %H:%M") + " WAT"
 NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"MF-REJ · Market Fluidity zone rejection (1H)",
-         "PAT-WEDGE":"PAT-WEDGE · 4H wedge breakout retest","PAT-TRIPLE":"PAT-TRIPLE · 4H triple top/bottom retest (FX)","PAT-CUP":"PAT-CUP · 4H cup &amp; handle retest","BRK":"BRK · 4H breakout (S/R or pattern)"}
+         "PAT-WEDGE":"PAT-WEDGE · 4H wedge breakout retest","PAT-TRIPLE":"PAT-TRIPLE · 4H triple top/bottom retest (FX)","PAT-CUP":"PAT-CUP · 4H cup &amp; handle retest","BRK":"BRK · 4H pattern neckline/trendline breakout"}
 PATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")
 def fmt(s):
     e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"
