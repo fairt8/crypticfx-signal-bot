@@ -3,7 +3,7 @@ import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
 from .telegram import fmt_price
-NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "Checklist [EXP]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [EXPERIMENTAL – paper test]", "DON20": "DON20 [EXPERIMENTAL – paper test]"}
+NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "⭐ CHK checklist [PRIMARY]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [experimental – collecting live results]", "DON20": "⭐ DON20 [PRIMARY]"}
 def label(r): return " + ".join(NAMES.get(t, t) for t in r["tags"])
 def build(hours=2):
     from .telegram import esc, code, wat
@@ -32,13 +32,11 @@ def build(hours=2):
     if len(op) > 15: L.append(f"… and {len(op)-15} more (see /signals)")
     bs = db.by_strategy()
     L += ["", "📈 <b>Live stats</b> <i>(60d, net after costs)</i>"]
-    for k, v in bs.items():
-        if k == "DON20": continue
+    for k, v in bs.items():   # CHK and DON20 (PRIMARY) come first
         wr = v['win_rate'] if v['win_rate'] is not None else '—'
         dot = "🟢" if v['net_r'] > 0 else ("🔴" if v['net_r'] < 0 else "⚪")
-        L.append(f"{dot} {esc(NAMES.get(k, k))}: {v['closed']} closed · win {wr}% · <code>{v['net_r']}R</code>")
-    d = bs.get("DON20") or {}
-    L.append(f"🧪 DON20 [EXPERIMENTAL – paper test]: {d.get('open',0)} open · {d.get('closed',0)} closed · <code>{d.get('net_r',0)}R</code>")
+        extra = f" · {v.get('open',0)} open" if k == "DON20" else ""
+        L.append(f"{dot} {esc(NAMES.get(k, k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
     return "\n".join(L)
 def due(every_h):
     last = db.kv_get("last_summary_at")

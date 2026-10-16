@@ -23,7 +23,9 @@ def fmt(s):
     strat = NAMES["MF-REJ"] if mf else " + ".join(NAMES.get(t, t) for t in tags)
     entry_lbl = "Entry (market, 1H close)" if s.get("strategy") in ("CHK", "MF-REJ") else "Entry (limit)"
     L = []
-    if exp: L.append("🧪 <b>EXPERIMENTAL – paper test</b>")
+    if s.get("strategy") == "CHK": L.append("⭐ <b>PRIMARY</b>")
+    elif mf: L.append("🧪 <b>experimental – collecting live results</b>")
+    elif exp: L.append("🧪 <b>EXPERIMENTAL – paper test</b>")
     L += [f"🏷 <b>{esc(strat)}</b>", "", f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", ""]
     L.append(f"📍 <b>{esc(entry_lbl)}:</b> {code(s['entry'])}")
     L.append(f"🛑 <b>Stop:</b> {code(s['sl'])}")
@@ -33,6 +35,8 @@ def fmt(s):
     else:
         if s.get("tp1"): L.append(f"🎯 <b>TP1 (1:1.5):</b> {code(s['tp1'])}")
         L.append(f"🎯 <b>TP2 (1:{s['rr']:g}):</b> {code(s['tp'])}")
+    if s.get("strategy") in C.PTP_STRATS: L.append("✂️ <i>Tracked: 50% closed at TP1, SL moved to entry, rest to TP2</i>")
+    else: L.append("✂️ <i>Optional: take 50% at TP1, move SL to entry</i>")
     c = s["confidence"]
     L += ["", f"📊 <b>Est. win probability:</b> {esc(c)}%", bar(c) + ("" if mf else "  <i>(needs &gt;25% to break even at 1:3)</i>")]
     L.append(f"📌 <b>Status:</b> {esc(s['status'])}")
@@ -78,7 +82,7 @@ def handle(text, chat):
     if cmd == "/stats":
         bs = db.by_strategy(); d = bs.get("DON20", {})
         return "\n".join(f"{v['label']}: {v['closed']} closed, win {v['win_rate']}%, net {v['net_r']}R ({v['open']} open)" for k, v in bs.items() if k != "DON20") + \
-            f"\nDON20 [EXPERIMENTAL – paper test]: {d.get('open',0)} open, {d.get('closed',0)} closed, win {d.get('win_rate')}%, net {d.get('net_r',0)}R" 
+            f"\n⭐ DON20 [PRIMARY]: {d.get('open',0)} open, {d.get('closed',0)} closed, win {d.get('win_rate')}%, net {d.get('net_r',0)}R" 
     if cmd == "/explain":
         s = db.get(int(arg)) if arg.isdigit() else None
         return ai.explain(s) if s else "Usage: /explain <id>"

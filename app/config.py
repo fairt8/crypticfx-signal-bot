@@ -50,5 +50,8 @@ FVG_STOP = E("FVG_STOP", "fvg")  # "fvg" = beyond the 3 FVG candles (video); "sw
 DAILY_REFRESH_HOURS = float(E("DAILY_REFRESH_HOURS", "6"))
 ENABLE_D1 = E("ENABLE_D1", "1") == "1"
 CALIB = {"crypto": (-1.3039, 0.00523), "forex": (-1.0018, 0.0)}  # refit 13 Oct on 15m FVG backtest (backtest-report-v2.md)
+ENABLE_FVG_PLAN = E("ENABLE_FVG_PLAN", "0") == "1"    # FVG-PLAN swing-stop variant: off (loses live + backtest)
+ENABLE_FVG_TREND = E("ENABLE_FVG_TREND", "0") == "1"  # FVG+TREND tag: off (loses live + backtest)
+PTP_STRATS = set(filter(None, E("PTP_STRATS", "FVG,CHK").split(",")))  # tracked outcome = 50% at TP1 (1.5R), SL to entry, rest to TP (bt_ptp)
 ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [EXPERIMENTAL] forex zone rejection (strategy.MF_PAIRS)
 ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [EXPERIMENTAL] daily Donchian-20 crypto breakout

@@ -26,7 +26,7 @@ def _upd(i, **kw):
 def summary():
     rs = _rows("SELECT status, result_r, net_r FROM don20"); cl = [r for r in rs if r["status"] == "closed"]
     w = sum((r["net_r"] or 0) > 0 for r in cl); nets = [r["net_r"] or 0 for r in cl]
-    return dict(label="DON20 [EXPERIMENTAL – paper test]", signals=len(rs), closed=len(cl), open=len(rs)-len(cl),
+    return dict(label="⭐ DON20 [PRIMARY]", signals=len(rs), closed=len(cl), open=len(rs)-len(cl),
                 win_rate=round(100*w/len(cl), 1) if cl else None, gross_r=round(sum(r["result_r"] or 0 for r in cl), 2),
                 net_r=round(sum(nets), 2), net_per_trade=round(sum(nets)/len(cl), 3) if cl else None)
 
@@ -67,7 +67,7 @@ def prices():
 def close(p, x, when, post, msgs):
     g, n = _r(p, x)
     _upd(p["id"], status="closed", closed_at=when, exit_price=x, result_r=round(g, 3), net_r=round(n, 3))
-    msgs.append(f"EXIT DON20 {p['direction'].upper()} {p['symbol']} [EXPERIMENTAL – paper test]\nTrailing stop hit at {fmtp(x)} "
+    msgs.append(f"EXIT DON20 {p['direction'].upper()} {p['symbol']} ⭐ [PRIMARY]\nTrailing stop hit at {fmtp(x)} "
                 f"(entry {fmtp(p['entry'])}).\nResult: {g:+.2f}R gross, {n:+.2f}R after fees.")
 def fmtp(x):
     from .telegram import fmt_price; return fmt_price(x)
@@ -145,12 +145,13 @@ def daily_run(universe, post=True, now=None):
             r = cur.fetchone()
         if not r: continue
         n["id"] = r["id"] if db.PG else r[0]
-        msgs.append(f"DON20 {n['direction'].upper()} {n['symbol']} [EXPERIMENTAL – paper test]\n#{n['id']} Daily close {fmtp(n['close'])} "
+        msgs.append(f"⭐ DON20 {n['direction'].upper()} {n['symbol']} [PRIMARY]\n#{n['id']} Daily close {fmtp(n['close'])} "
                     f"{'above the 20-day high' if n['direction']=='long' else 'below the 20-day low'}\nEntry (market, now): {fmtp(n['entry'])}\n"
                     f"Initial stop (3×ATR20, 1R): {fmtp(n['stop'])}\nTrailing 3×ATR, no fixed target, expect ~40% wins, avg winner ~1.4R.\n"
-                    "Daily trailing-stop updates follow; EXIT is posted when the stop is hit.\n\nNot financial advice.")
+                    "Daily trailing-stop updates follow; EXIT is posted when the stop is hit.\n"
+                    f"Optional: take 50% at 1.5R ({fmtp(n['entry'] + (1.5 if n['direction']=='long' else -1.5)*abs(n['entry']-n['stop']))}), move SL to entry, trail the rest.\n\nNot financial advice.")
     if trail:
-        lines = [f"DON20 trailing stops – {now.strftime('%d %b')} [EXPERIMENTAL – paper test]"]
+        lines = [f"⭐ DON20 trailing stops – {now.strftime('%d %b')} [PRIMARY]"]
         for p, old, new in trail:
             lines.append(f"• {p['symbol']} {p['direction'].upper()} entry {fmtp(p['entry'])} → stop {fmtp(new)}" + ("" if new != old else " (unchanged)"))
         msgs.append("\n".join(lines))

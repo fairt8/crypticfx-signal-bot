@@ -27,7 +27,7 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                     if b == sig["direction"]:
                         sig["tags"] = sig["tags"] + ["FVG-D1"]; sig["reasons"].append(f"Daily structure bias {b} (FVG-D1 [EXPERIMENTAL])")
                 if sig: found.append(sig)
-                if sig and "crypto" in C.EXPERIMENTAL_MARKETS:
+                if sig and C.ENABLE_FVG_PLAN and "crypto" in C.EXPERIMENTAL_MARKETS:
                     pv = strategy.plan_variant(sig)
                     if pv: found.append(pv)
                 w = strategy.watch_info(s, "crypto", h4, m5)

@@ -85,7 +85,7 @@ def analyze(symbol, market, h4, m5, extra=None):
         in_session=in_major_session(conf_t.to_pydatetime()), confidence=calibrate(sc, market), setup_score=sc,
         strategy="FVG", experimental=0, swing_sl=swing, fvg3_sl=float(three.l.min() if g["dir"]=="long" else three.h.max()),
         tap_to_confirm_bars=int(xi-ti),
-        tags=["FVG"] + (["FVG+TREND"] if market in C.EXPERIMENTAL_MARKETS and any("EMA50/EMA200 trend aligned" in w for w in why) else []),
+        tags=["FVG"] + (["FVG+TREND"] if C.ENABLE_FVG_TREND and market in C.EXPERIMENTAL_MARKETS and any("EMA50/EMA200 trend aligned" in w for w in why) else []),
         reasons=why + [f"Raw setup score {sc}/95 -> calibrated win probability {calibrate(sc, market)}% (backtest)"])
 
 def score(g, h4, mupto, m5, market, conf_t, extra):
