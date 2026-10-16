@@ -8,9 +8,33 @@ def crypto_universe():
         STATE["universe"] = binance.top_usdt_symbols(); STATE["universe_at"] = time.time()
     return STATE["universe"]
 
+_PAT_DONE = set()
+PAT_STRATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")
+def patterns_for(data, market, found, budget_end):
+    """PAT-*/BRK on the already-fetched closed 4H candles (no extra downloads). Max PAT_MAX_PER_SCAN per strategy."""
+    if not (C.ENABLE_PAT or C.ENABLE_BRK): return
+    from . import patterns_live as PL
+    got = {}
+    for s, v in data.items():
+        if time.time() > budget_end: STATE["errors"].append(f"patterns {market}: time budget hit"); break
+        if market == "forex" and s not in C.PAT_FX: continue
+        try:
+            h4 = v[0]; sigs = []
+            if h4 is None or not len(h4): continue
+            key = (s, str(h4.t.iloc[-1]))
+            if key in _PAT_DONE: continue   # this closed 4H bar was already evaluated (Render loop); DB unique key dedupes anyway
+            if C.ENABLE_PAT: sigs += PL.live_pat(s, market, h4)
+            if C.ENABLE_BRK: sigs += PL.live_brk(s, market, h4)
+            for g in sigs: got.setdefault(g["strategy"], []).append(g)
+            _PAT_DONE.add(key)
+        except Exception as e: STATE["errors"].append(f"patterns {s}: {e}")
+    if len(_PAT_DONE) > 20000: _PAT_DONE.clear()
+    for k, L in got.items(): found.extend(L[:max(0, C.PAT_MAX_PER_SCAN - sum(g.get("strategy") == k for g in found))])   # cap per strategy per whole scan
+    STATE.setdefault("pat_counts", {})[market] = {k: len(L) for k, L in got.items()}
+
 def qualifies(sig):
     """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
-    if sig.get("strategy") == "MF-REJ": return True   # own forex strategy with its own filters (session, bias, range, 2/day)
+    if sig.get("strategy") == "MF-REJ" or sig.get("strategy") in PAT_STRATS: return True   # own rules; MIN_POST_SCORE does not apply   # own forex strategy with its own filters (session, bias, range, 2/day)
     return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
 
 def scan(crypto=True, fx=True, post=True, gen=None):
@@ -36,6 +60,8 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                     sig = strategy.analyze_chk(s, "crypto", h4, h1)
                     if sig: found.append(sig)
             except Exception as e: STATE["errors"].append(f"{s}: {e}")
+        try: patterns_for(data, "crypto", found, t0 + C.SCAN_WATCHDOG_S*0.6)
+        except Exception as e: STATE["errors"].append(f"patterns crypto: {e}")
     if fx:
         try:
             data = forex.provider().fetch_many(forex.FOREX_30); cache.update(data)
@@ -52,6 +78,8 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                         sig = strategy.analyze_chk(p, "forex", h4, h1)
                         if sig: found.append(sig)
                 except Exception as e: STATE["errors"].append(f"{p}: {e}")
+            try: patterns_for(data, "forex", found, t0 + C.SCAN_WATCHDOG_S*0.8)
+            except Exception as e: STATE["errors"].append(f"patterns forex: {e}")
             if C.ENABLE_MF:
               try:
                   import pandas as pd

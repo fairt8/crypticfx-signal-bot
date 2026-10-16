@@ -3,7 +3,8 @@ import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
 from .telegram import fmt_price
-NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "⭐ CHK checklist [PRIMARY]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [experimental – collecting live results]", "DON20": "⭐ DON20 [PRIMARY]"}
+NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "⭐ CHK checklist [PRIMARY]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [experimental – collecting live results]", "DON20": "⭐ DON20 [PRIMARY]",
+         "PAT-WEDGE": "PAT-WEDGE [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE [EXPERIMENTAL – paper]", "PAT-CUP": "PAT-CUP [EXPERIMENTAL – paper]", "BRK": "BRK [EXPERIMENTAL – paper]"}
 def label(r): return " + ".join(NAMES.get(t, t) for t in r["tags"])
 def build(hours=2):
     from .telegram import esc, code, wat

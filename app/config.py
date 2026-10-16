@@ -55,3 +55,7 @@ ENABLE_FVG_TREND = E("ENABLE_FVG_TREND", "0") == "1"  # FVG+TREND tag: off (lose
 PTP_STRATS = set(filter(None, E("PTP_STRATS", "FVG,CHK").split(",")))  # tracked outcome = 50% at TP1 (1.5R), SL to entry, rest to TP (bt_ptp)
 ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [EXPERIMENTAL] forex zone rejection (strategy.MF_PAIRS)
 ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [EXPERIMENTAL] daily Donchian-20 crypto breakout
+ENABLE_PAT = E("ENABLE_PAT", "1") == "1"   # PAT-WEDGE / PAT-TRIPLE / PAT-CUP [EXPERIMENTAL – paper] 4H pattern retests (app/patterns_live.py)
+ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [EXPERIMENTAL – paper] 4H S/R + pattern breakout
+PAT_MAX_PER_SCAN = int(E("PAT_MAX_PER_SCAN", "3"))   # max new posts per PAT-*/BRK strategy per scan (no bursts)
+PAT_FX = ["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD","EURJPY","GBPJPY","XAUUSD"]   # PAT-TRIPLE / BRK forex universe (backtested)

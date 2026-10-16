@@ -15,10 +15,13 @@ def wat(ts=None):
     except Exception: d = _dt.now(_tz.utc)
     if d.tzinfo is None: d = d.replace(tzinfo=_tz.utc)
     return d.astimezone(_tz(_td(hours=1))).strftime("%d %b %H:%M") + " WAT"
-NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"MF-REJ · Market Fluidity zone rejection (1H)"}
+NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"MF-REJ · Market Fluidity zone rejection (1H)",
+         "PAT-WEDGE":"PAT-WEDGE · 4H wedge breakout retest","PAT-TRIPLE":"PAT-TRIPLE · 4H triple top/bottom retest (FX)","PAT-CUP":"PAT-CUP · 4H cup &amp; handle retest","BRK":"BRK · 4H breakout (S/R or pattern)"}
+PATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")
 def fmt(s):
     e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"
     tags = s.get("tags") or ["FVG"]; mf = s.get("strategy") == "MF-REJ"
+    if s.get("strategy") in PATS: return fmt_pat(s)
     exp = mf or s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
     strat = NAMES["MF-REJ"] if mf else " + ".join(NAMES.get(t, t) for t in tags)
     entry_lbl = "Entry (market, 1H close)" if s.get("strategy") in ("CHK", "MF-REJ") else "Entry (limit)"
@@ -45,6 +48,21 @@ def fmt(s):
     rs = (s.get("reasons") or [])[1:]
     if rs: L += ["", "<b>Why:</b>"] + ["• " + esc(r) for r in rs]
     L += ["", "<i>Not financial advice.</i>"]
+    return "\n".join(L)
+def fmt_pat(s):
+    e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"; sd = 1 if s["direction"] == "long" else -1
+    risk = abs(s["entry"] - s["sl"]); tp1 = s["entry"] + sd*1.5*risk; tp2 = s["entry"] + sd*3*risk; tr = float(s["rr"])
+    L = ["🧪 <b>EXPERIMENTAL – paper</b>", f"🏷 <b>{NAMES.get(s['strategy'], esc(s['strategy']))}</b>", "",
+         f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", "",
+         f"📍 <b>Entry (market, 4H close):</b> {code(s['entry'])}", f"🛑 <b>Stop:</b> {code(s['sl'])}",
+         f"🎯 <b>TP1 (1:1.5):</b> {code(tp1)}" + ("  ✅ <i>tracked</i>" if tr == 1.5 else ""),
+         f"🎯 <b>TP2 (1:3):</b> {code(tp2)}" + ("  ✅ <i>tracked</i>" if tr == 3 else ""), ""]
+    c = s["confidence"]; be = 40 if tr == 1.5 else 25
+    L += [f"📊 <b>Backtest win rate (confidence):</b> {esc(c)}%", bar(c) + f"  <i>(needs &gt;{be}% to break even at 1:{tr:g})</i>",
+          f"📌 <b>Status:</b> {esc(s['status'])}", f"⏰ {wat(s.get('confirm_time') or s.get('created_at'))}"]
+    rs = (s.get("reasons") or [])[1:]
+    if rs: L += ["", "<b>Why:</b>"] + ["• " + esc(r) for r in rs]
+    L += ["", "<i>Paper test only. Not financial advice.</i>"]
     return "\n".join(L)
 def send(text, chat_id=None, html=False):
     if not enabled() or not (chat_id or C.TELEGRAM_CHAT_ID): return False
