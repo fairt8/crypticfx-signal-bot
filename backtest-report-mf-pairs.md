@@ -1,9 +1,10 @@
 # MF-REJ pair expansion (one-home-currency rule)
 
-Home currencies: Asian JPY AUD NZD CNH | London GBP EUR CHF | NY USD CAD; metals follow USD (no home of their own). A pair-session is a candidate when exactly one currency is at home. Universe: forex.FOREX_30 + CNH pairs with yfinance 1H data (USDCNH, EURCNH, GBPCNH, CHFCNH, CADCNH; AUDCNH/NZDCNH/CNHJPY have no qualifying session).
-Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H touches or 4H/Daily level, pad 0.5 ATR, next-zone TP ≥ 0.5R), 2 signals/day/pair cap. 1H 2024-10-15 → 2026-10-15, Y1 to 2025-10-15. Costs 0.02% USD majors, 0.03% crosses and all CNH pairs, 0.05% metals. Keep rule: R/trade ≥ −0.05 and not negative in both years. Scripts: bt_mfs/run.py, bt_mfs/cnh.py, bt_mfs/expand.py.
+Home currencies: Asian JPY AUD NZD CNH | London GBP EUR CHF | NY USD CAD; gold/silver have no home (USD/GBP/EUR leg decides). Candidate = exactly one currency at home. Universe: forex.FOREX_30 + CNH pairs with yfinance 1H data + synthetic XAUGBP/XAUEUR (GC=F / GBPUSD|EURUSD, wide highs/lows; bt_mfs/xau_cross.py).
+Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H touches or 4H/Daily level, pad 0.5 ATR, next-zone TP ≥ 0.5R), 2 signals/day/pair. 1H 2024-10-15 → 2026-10-15, Y1 to 2025-10-15. Costs 0.02% USD majors, 0.03% crosses + CNH, 0.05% metals. Keep: R/trade ≥ −0.05 and not negative in both years.
+User 2026-10-17: EURJPY removed and XAUUSD NY removed (blocked also for the dynamic strong pair; previously EURJPY Asian 8/−0.41R, London 6/−0.47R; XAUUSD NY 7/−0.71R).
 
-## Designated Top5 (unchanged)
+## Top5 (designated)
 
 |Pair|Session|n (2y)|Win%|Net R|R/trade|Y1 n/win/R|Y2 n/win/R|
 |-|-|-|-|-|-|-|-|
@@ -11,11 +12,8 @@ Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H to
 |USDJPY|NY|7|71|+1.36|+0.19|5/80%/+2.34|2/50%/-0.98|
 |GBPJPY|London|4|75|+2.46|+0.61|2/50%/+0.44|2/100%/+2.02|
 |GBPJPY|NY|5|80|+0.28|+0.06|2/50%/-0.75|3/100%/+1.02|
-|EURJPY|Asian|8|38|-3.29|-0.41|7/29%/-3.99|1/100%/+0.70|
-|EURJPY|London|6|33|-2.82|-0.47|6/33%/-2.82|0/-%/+0.00|
 |EURUSD|London|5|80|+4.80|+0.96|2/50%/+3.51|3/100%/+1.29|
 |XAUUSD|London|12|50|-1.49|-0.12|4/0%/-5.04|8/75%/+3.55|
-|XAUUSD|NY|7|29|-4.95|-0.71|4/25%/-3.18|3/33%/-1.77|
 
 ## Added
 
@@ -71,3 +69,5 @@ Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H to
 |CHFCNH|London|8|38|-3.84|-0.48|2/50%/-0.04|6/33%/-3.80|
 |CADCNH|Asian|21|43|-9.42|-0.45|5/80%/+3.39|16/31%/-12.81|
 |CADCNH|NY|9|56|-2.37|-0.26|4/50%/-1.49|5/60%/-0.88|
+|XAUGBP|London|21|52|-3.06|-0.15|5/0%/-6.11|16/69%/+3.05|
+|XAUEUR|London|19|37|-8.86|-0.47|6/50%/-1.53|13/31%/-7.33|

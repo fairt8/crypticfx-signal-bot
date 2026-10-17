@@ -224,13 +224,14 @@ MF_SESSIONS_UTC = {"Asian": (0, 7), "London": (7, 12), "NY": (12, 17)}   # UTC h
 # a pair signals in a session only when exactly ONE of its currencies is "at home" there
 # (Asian: JPY AUD NZD CNH | London: GBP EUR CHF | NY: USD CAD; metals follow USD). Each added pair-session passed the
 # 2y 1H strong-zone backtest (net >= -0.05R/trade, not negative in both years): bt_mfs/expand.py, backtest-report-mf-pairs.md
-MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"], "EURJPY": ["Asian", "London"],
-            "EURUSD": ["London"], "XAUUSD": ["London", "NY"],
+MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"],
+            "EURUSD": ["London"], "XAUUSD": ["London"],   # user 2026-10-17: EURJPY removed, XAUUSD NY removed (both losing)
             # added (one-home-currency rule + backtest filter)
             "AUDUSD": ["NY"], "NZDUSD": ["Asian"], "EURAUD": ["Asian"], "EURCAD": ["NY"], "EURNZD": ["London"],
             "GBPNZD": ["Asian"], "AUDCAD": ["Asian"], "NZDCAD": ["Asian"], "CADCHF": ["London", "NY"],
             "GBPCNH": ["Asian"]}   # CNH pair: not in FOREX_30, fetched for MF only (forex.MF_EXTRA)
-MF_DESIGNATED = ("USDJPY", "GBPJPY", "EURJPY", "EURUSD", "XAUUSD")
+MF_DESIGNATED = ("USDJPY", "GBPJPY", "EURUSD", "XAUUSD")   # "⭐ Top5" label (remaining original pairs)
+MF_BLOCKED = {"EURJPY": ("Asian", "London", "NY"), "XAUUSD": ("NY",)}   # never signal here, not even as the dynamic strong pair
 MF_MAX_PER_SCAN = 4   # overall MF-REJ cap per scan (designated pairs first, then higher R:R)
 MF_CONFIDENCE = 55   # backtest win rate of strong-zone MF-REJ at the next-zone TP (65 trades, 2y 1H)
 def mf_session(symbol, t):
@@ -250,7 +251,7 @@ def mf_strong_pair(strength, universe, t):
     if not sess or len(cur) < 2: return None, sess
     hi = max(cur, key=cur.get); lo = min(cur, key=cur.get)
     for p in (hi+lo, lo+hi):
-        if p in universe and sess not in MF_PAIRS.get(p, []): return p, sess
+        if p in universe and sess not in MF_PAIRS.get(p, []) and sess not in MF_BLOCKED.get(p, ()): return p, sess
     return None, sess
 def mf_precheck(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None):
     """Cheap gates of analyze_mf (no downloads): allowed session, fresh 1H candle, flip candle, 2/day cap."""
@@ -259,7 +260,7 @@ def mf_precheck(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=No
     if (pd.Timestamp.now(tz="UTC") - ct) > pd.Timedelta(minutes=max_age_min): return False
     sess = mf_session(symbol, ct)
     if strong_session and mf_current_session(ct) == strong_session: sess = strong_session
-    if not sess: return False
+    if not sess or sess in MF_BLOCKED.get(symbol, ()): return False
     O, Cl = x.o.values, x.c.values
     return bool((Cl[i-1] < O[i-1] and Cl[i] > O[i]) or (Cl[i-1] > O[i-1] and Cl[i] < O[i]))
 def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None, h4_long=None):

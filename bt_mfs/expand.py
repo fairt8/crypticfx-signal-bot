@@ -3,12 +3,14 @@ import pickle, sys, glob, numpy as np, pandas as pd
 sys.path.insert(0,'.')
 from app.forex import FOREX_30
 HOME={'Asian':{'JPY','AUD','NZD','CNH'},'London':{'GBP','EUR','CHF'},'NY':{'USD','CAD'}}
-FIXED={'USDJPY':['Asian','NY'],'GBPJPY':['London','NY'],'EURJPY':['Asian','London'],'EURUSD':['London'],'XAUUSD':['London','NY']}
+FIXED={'USDJPY':['Asian','NY'],'GBPJPY':['London','NY'],'EURUSD':['London'],'XAUUSD':['London']}   # user 2026-10-17: EURJPY and XAUUSD NY removed
+BLOCK={('EURJPY','Asian'),('EURJPY','London'),('EURJPY','NY'),('XAUUSD','NY')}
 def one_home(p,s):
     b,q=p[:3],p[3:]; h=HOME[s]
     return ((b in h)+(q in h))==1   # metals (XAU/XAG) have no home of their own -> session decided by USD
 CNH=['USDCNH','EURCNH','GBPCNH','CHFCNH','CADCNH','AUDCNH','NZDCNH','CNHJPY']   # yfinance 1H available (bt_mfs/cnh.py)
-cand=[(p,s) for p in FOREX_30+CNH if p not in FIXED for s in HOME if one_home(p,s)]
+XAUX=['XAUGBP','XAUEUR']   # synthetic (bt_mfs/xau_cross.py)
+cand=[(p,s) for p in FOREX_30+CNH+XAUX if p not in FIXED for s in HOME if one_home(p,s) and (p,s) not in BLOCK]
 rows=[]
 for f in glob.glob('bt_mfs/ck/1h_*.pkl'): rows+=pickle.load(open(f,'rb'))
 d=pd.DataFrame(rows); d['t']=pd.to_datetime(d.t,utc=True)
