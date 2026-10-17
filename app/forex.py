@@ -8,6 +8,9 @@ FOREX_30 = ["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
     "EURGBP","EURJPY","EURCHF","EURAUD","EURCAD","EURNZD","GBPJPY","GBPCHF","GBPAUD","GBPCAD","GBPNZD",
     "AUDJPY","AUDCAD","AUDCHF","AUDNZD","NZDJPY","NZDCAD","NZDCHF","CADJPY","CADCHF","CHFJPY","XAGUSD","XAUUSD"]
 
+# Extra instruments fetched ONLY for MF-REJ (not ranked/scanned by the other forex strategies)
+MF_EXTRA = ["GBPCNH"]
+
 # Session windows in UTC (fixed; DST shifts of ~1h are ignored in v1)
 SESSIONS = {"Sydney": (21, 6), "Tokyo": (0, 9), "London": (7, 16), "NewYork": (12, 21)}
 SESSION_CCY = {"Sydney": {"AUD","NZD"}, "Tokyo": {"JPY","AUD","NZD"},
@@ -28,7 +31,7 @@ class YFinanceProvider:
     """Keyless. Unofficial Yahoo data: ~delayed, 5m history ≤60d, no 4h interval (resampled from 1h).
     Gold/silver use futures (GC=F / SI=F) as proxies for XAUUSD / XAGUSD."""
     name = "yfinance"
-    def ticker(self, p): return {"XAUUSD":"GC=F","XAGUSD":"SI=F"}.get(p, p+"=X")
+    def ticker(self, p): return {"XAUUSD":"GC=F","XAGUSD":"SI=F","USDCNH":"CNH=X"}.get(p, p+"=X")
     def _dl(self, tickers, interval, period):
         import yfinance as yf
         from concurrent.futures import ThreadPoolExecutor

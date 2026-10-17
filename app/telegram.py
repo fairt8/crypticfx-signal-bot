@@ -15,15 +15,21 @@ def wat(ts=None):
     except Exception: d = _dt.now(_tz.utc)
     if d.tzinfo is None: d = d.replace(tzinfo=_tz.utc)
     return d.astimezone(_tz(_td(hours=1))).strftime("%d %b %H:%M") + " WAT"
-NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"MF-REJ · Market Fluidity zone rejection (1H)",
+NAMES = {"FVG":"FVG (live)","FVG+TREND":"FVG + 4H trend filter","CHK":"Varsity checklist","FVG-PLAN":"FVG creator plan (swing stop)","FVG-D1":"FVG-D1 daily bias","MF-REJ":"FOREX MF-REJ · Market Fluidity zone rejection (1H)",
          "PAT-WEDGE":"PAT-WEDGE · 4H wedge breakout retest","PAT-TRIPLE":"PAT-TRIPLE · 4H triple top/bottom retest (FX)","PAT-CUP":"PAT-CUP · 4H cup &amp; handle retest","BRK":"BRK · 4H pattern neckline/trendline breakout"}
 PATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")
+def mf_label(sym):
+    """MF-REJ pair label: the user's 5 designated pairs = Top5; other mapped pairs = Session pair; else dynamic Strong pair."""
+    from . import strategy
+    if sym in strategy.MF_DESIGNATED: return "⭐ Top5"
+    return "🕐 Session pair" if sym in strategy.MF_PAIRS else "⚡ Strong pair"
 def fmt(s):
     e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"
     tags = s.get("tags") or ["FVG"]; mf = s.get("strategy") == "MF-REJ"
     if s.get("strategy") in PATS: return fmt_pat(s)
     exp = mf or s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
     strat = NAMES["MF-REJ"] if mf else " + ".join(NAMES.get(t, t) for t in tags)
+    if mf: strat += "  " + mf_label(s.get("symbol"))
     entry_lbl = "Entry (market, 1H close)" if s.get("strategy") in ("CHK", "MF-REJ") else "Entry (limit)"
     L = []
     if s.get("strategy") == "CHK": L.append("⭐ <b>PRIMARY</b>")

@@ -220,9 +220,18 @@ def daily_bias(d1, now=None, k=2):
 
 # ---------------- EXPERIMENTAL: Market Fluidity zone rejection "MF-REJ" (backtest-report-mf.md, app/backtest_mf.py) ----------------
 MF_SESSIONS_UTC = {"Asian": (0, 7), "London": (7, 12), "NY": (12, 17)}   # UTC hours [start, end)
-# User's handwritten sheet: pair -> sessions it may signal in (edit here)
+# User's handwritten sheet (the 5 designated pairs, unchanged) + pairs added by the one-home-currency rule:
+# a pair signals in a session only when exactly ONE of its currencies is "at home" there
+# (Asian: JPY AUD NZD CNH | London: GBP EUR CHF | NY: USD CAD; metals follow USD). Each added pair-session passed the
+# 2y 1H strong-zone backtest (net >= -0.05R/trade, not negative in both years): bt_mfs/expand.py, backtest-report-mf-pairs.md
 MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"], "EURJPY": ["Asian", "London"],
-            "EURUSD": ["London"], "XAUUSD": ["London", "NY"]}
+            "EURUSD": ["London"], "XAUUSD": ["London", "NY"],
+            # added (one-home-currency rule + backtest filter)
+            "AUDUSD": ["NY"], "NZDUSD": ["Asian"], "EURAUD": ["Asian"], "EURCAD": ["NY"], "EURNZD": ["London"],
+            "GBPNZD": ["Asian"], "AUDCAD": ["Asian"], "NZDCAD": ["Asian"], "CADCHF": ["London", "NY"],
+            "GBPCNH": ["Asian"]}   # CNH pair: not in FOREX_30, fetched for MF only (forex.MF_EXTRA)
+MF_DESIGNATED = ("USDJPY", "GBPJPY", "EURJPY", "EURUSD", "XAUUSD")
+MF_MAX_PER_SCAN = 4   # overall MF-REJ cap per scan (designated pairs first, then higher R:R)
 MF_CONFIDENCE = 55   # backtest win rate of strong-zone MF-REJ at the next-zone TP (65 trades, 2y 1H)
 def mf_session(symbol, t):
     h = t.hour
@@ -236,28 +245,35 @@ def mf_current_session(t):
     return None
 def mf_strong_pair(strength, universe, t):
     """Dynamic 'strong pair' for the session open at t: strongest currency vs weakest (metals excluded), if that pair
-    exists in the universe and is not already in MF_PAIRS. Returns (pair, session) or (None, session)."""
+    exists in the universe and is not already allowed in that session by MF_PAIRS. Returns (pair, session) or (None, session)."""
     sess = mf_current_session(t); cur = {k: v for k, v in (strength or {}).items() if k not in ("XAU", "XAG")}
     if not sess or len(cur) < 2: return None, sess
     hi = max(cur, key=cur.get); lo = min(cur, key=cur.get)
     for p in (hi+lo, lo+hi):
-        if p in universe and p not in MF_PAIRS: return p, sess
+        if p in universe and sess not in MF_PAIRS.get(p, []): return p, sess
     return None, sess
+def mf_precheck(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None):
+    """Cheap gates of analyze_mf (no downloads): allowed session, fresh 1H candle, flip candle, 2/day cap."""
+    if (symbol not in MF_PAIRS and not strong_session) or h1 is None or len(h1) < 60 or h4 is None or len(h4) < 30 or today_count >= 2: return False
+    x = h1; i = len(x) - 1; ct = x.ct.iloc[i]
+    if (pd.Timestamp.now(tz="UTC") - ct) > pd.Timedelta(minutes=max_age_min): return False
+    sess = mf_session(symbol, ct)
+    if strong_session and mf_current_session(ct) == strong_session: sess = strong_session
+    if not sess: return False
+    O, Cl = x.o.values, x.c.values
+    return bool((Cl[i-1] < O[i-1] and Cl[i] > O[i]) or (Cl[i-1] > O[i-1] and Cl[i] < O[i]))
 def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=None, h4_long=None):
     """MF-REJ, strong body-based S/R (bt_mfs/run.py best variant: body Daily+4H bias, zone = body swing levels clustered
     within 0.25 ATR, strong = 2+ touches OR 4H/Daily level, 1H flip-close entry at market, stop = far zone edge + 0.5 ATR,
     TP = next strong opposing zone, only if >= 0.5R)."""
     from . import mf as B
-    if (symbol not in MF_PAIRS and not strong_session) or h1 is None or len(h1) < 60 or len(h4) < 30 or today_count >= 2: return None
+    if not mf_precheck(symbol, h4, h1, max_age_min, today_count, strong_session): return None
     x = h1.reset_index(drop=True); i = len(x) - 1; ct = x.ct.iloc[i]
-    if (pd.Timestamp.now(tz="UTC") - ct) > pd.Timedelta(minutes=max_age_min): return None
     sess = mf_session(symbol, ct)
     if strong_session and mf_current_session(ct) == strong_session: sess = strong_session
-    if not sess: return None
     O, H, L, Cl = x.o.values, x.h.values, x.l.values, x.c.values
-    flip_up = Cl[i-1] < O[i-1] and Cl[i] > O[i]; flip_dn = Cl[i-1] > O[i-1] and Cl[i] < O[i]
-    if not (flip_up or flip_dn): return None
-    d = 1 if flip_up else -1
+    d = 1 if Cl[i] > O[i] else -1
+    if callable(h4_long): h4_long = h4_long()   # lazy 1y download, only for pairs that passed the cheap checks
     hh = h4_long if h4_long is not None and len(h4_long) >= len(h4) else h4
     t = ct.to_datetime64()
     hh = hh[hh.ct.values <= t].reset_index(drop=True)
@@ -295,8 +311,9 @@ def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=Non
     rr = float((tz - entry)*d/risk)
     if rr < 0.5: return None
     dr = "long" if d == 1 else "short"
-    why = ["MF-REJ [EXPERIMENTAL – paper test]",
-           (f"Session: {sess} – strong pair of {sess} (strongest vs weakest currency, 24h strength)" if symbol not in MF_PAIRS
+    lbl = "⭐ Top5" if symbol in MF_DESIGNATED else "🕐 Session pair" if sess in MF_PAIRS.get(symbol, []) else "⚡ Strong pair"
+    why = [f"FOREX MF-REJ [EXPERIMENTAL – paper test] · {lbl}",
+           (f"Session: {sess} – strong pair of {sess} (strongest vs weakest currency, 24h strength)" if sess not in MF_PAIRS.get(symbol, [])
             else f"Session: {sess} ({symbol} allowed in {', '.join(MF_PAIRS[symbol])})"),
            f"Daily and 4H body structure both {'up (HH+HL)' if d == 1 else 'down (LH+LL)'}",
            f"Strong {'support' if d == 1 else 'resistance'} zone {zlo:.5g}–{zhi:.5g} (body levels; {n} 1H touches{', 4H/Daily level' if hn else ''}); 1H candle closed flipped {dr}",

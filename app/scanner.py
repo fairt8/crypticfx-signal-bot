@@ -86,13 +86,27 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                   from . import mf
                   sp, ss = strategy.mf_strong_pair(st, data, pd.Timestamp.now(tz="UTC").floor("h"))   # session of the last closed 1H candle ≈ current hour
                   STATE["mf_strong_pair"] = dict(pair=sp, session=ss)
-                  for p in list(strategy.MF_PAIRS) + ([sp] if sp else []):
+                  extra = [p for p in forex.MF_EXTRA if p in strategy.MF_PAIRS and p not in data]
+                  if extra:   # CNH etc.: fetched for MF only, not ranked or scanned by the other strategies
+                      try: xd = forex.provider().fetch_many(extra); cache.update(xd); data = {**data, **xd}
+                      except Exception as e: STATE["errors"].append(f"MF extra: {e}")
+                  cands = []
+                  for p in dict.fromkeys(list(strategy.MF_PAIRS) + ([sp] if sp else [])):
                       if p not in data: continue
                       try:
-                          sig = strategy.analyze_mf(p, data[p][0], data[p][2], today_count=db.count_today(p, "MF-REJ"),
-                                                    strong_session=ss if p == sp else None, h4_long=mf.htf_h4(p, data[p][0]))
-                          if sig: found.append(sig)
+                          kw = dict(today_count=db.count_today(p, "MF-REJ"), strong_session=ss if p == sp else None)
+                          if strategy.mf_precheck(p, data[p][0], data[p][2], **kw): cands.append((p, kw))
                       except Exception as e: STATE["errors"].append(f"MF {p}: {e}")
+                  mf.prefetch_htf([p for p, _ in cands], deadline=t0 + C.SCAN_WATCHDOG_S*0.85)   # one batched 1y download, cached 6h
+                  mfs = []
+                  for p, kw in cands:
+                      try:
+                          sig = strategy.analyze_mf(p, data[p][0], data[p][2], h4_long=mf.htf_h4(p, data[p][0]), **kw)
+                          if sig and not db.exists(sig["symbol"], sig["confirm_time"], "MF-REJ"): mfs.append(sig)
+                      except Exception as e: STATE["errors"].append(f"MF {p}: {e}")
+                  mfs.sort(key=lambda g: (g["symbol"] not in strategy.MF_DESIGNATED, -g["rr"]))
+                  found += mfs[:strategy.MF_MAX_PER_SCAN]   # overall MF cap per scan
+                  STATE["mf_last"] = dict(prechecked=[p for p, _ in cands], signals=len(mfs), posted=min(len(mfs), strategy.MF_MAX_PER_SCAN))
               except Exception as e: STATE["errors"].append(f"MF: {e}")
         except Exception as e: STATE["errors"].append(f"forex: {e}")
     if gen is not None and gen != STATE.get("gen"):   # watchdog abandoned this scan: don't save/post stale results

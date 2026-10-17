@@ -71,6 +71,9 @@ def insert(s):
            int(s.get("experimental",0)), s.get("status","pending"), s.get("filled_at")))
         r = cur.fetchone()
         return (r["id"] if PG else r[0]) if r else None
+def exists(symbol, confirm_time, strategy):
+    with conn() as c:
+        return c.execute("SELECT 1 FROM signals WHERE symbol=? AND confirm_time=? AND strategy=?", (symbol, confirm_time, strategy)).fetchone() is not None
 def recent(days=30, limit=500):
     since = (datetime.now(timezone.utc)-timedelta(days=days)).isoformat()
     with conn() as c:
@@ -96,7 +99,7 @@ def net_r(r):
     if r["result_r"] is None: return None
     risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if r["symbol"] in ("XAUUSD","XAGUSD") else r["market"]
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
-STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "⭐ CHK Varsity checklist [PRIMARY]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "MF-REJ [experimental – collecting live results]",
+STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "⭐ CHK Varsity checklist [PRIMARY]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "FOREX MF-REJ [experimental – collecting live results]",
           "PAT-WEDGE": "PAT-WEDGE 4H wedge retest, 1:3 [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE 4H FX triple top/bottom retest, 1:1.5 [EXPERIMENTAL – paper]",
           "PAT-CUP": "PAT-CUP 4H cup & handle retest, 1:3 [EXPERIMENTAL – paper]", "BRK": "BRK 4H crypto neckline/trendline breakout, 1:3 [EXPERIMENTAL – paper]"}
 def by_strategy(days=60):

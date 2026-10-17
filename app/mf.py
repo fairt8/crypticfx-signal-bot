@@ -50,19 +50,29 @@ def cluster(levels, anchor, tol):
     return (c.min(), c.max(), len(c)) if len(c) else (anchor, anchor, 0)
 
 _HTF = {}   # symbol -> (fetched_at, h4)   longer 1H history (1y) for 4H/Daily levels; refreshed every 6h
-def htf_h4(symbol, fallback):
-    now = _time.time(); c = _HTF.get(symbol)
-    if c and now - c[0] < 6*3600: return c[1]
+def _h4_from(a):
+    h4 = a.resample("4h", origin="epoch").agg(AGG).dropna(); h4["t"] = h4.index; h4["ct"] = h4.t + pd.Timedelta("4h")
+    h4 = h4.reset_index(drop=True); return h4[h4.ct <= pd.Timestamp.now(tz="UTC")].reset_index(drop=True)
+def prefetch_htf(symbols, deadline=None):
+    """One batched 1y 1H download for all symbols not cached (<6h). Only called for pairs that passed mf_precheck,
+    so a typical scan downloads 0-3 pairs. Skipped when past `deadline` (epoch s): htf_h4 then falls back to 60d."""
+    now = _time.time(); need = [s for s in dict.fromkeys(symbols) if not (_HTF.get(s) and now - _HTF[s][0] < 6*3600)]
+    if not need or (deadline and now > deadline): return
     try:
         from . import forex
         pv = forex.provider()
-        if getattr(pv, "name", "") != "yfinance": return fallback
-        raw = pv._dl([pv.ticker(symbol)], "1h", "1y")   # time-capped download (YF_BUDGET_S)
-        a = pv._norm(raw[pv.ticker(symbol)] if pv.ticker(symbol) in raw.columns.get_level_values(0) else raw)
-        h4 = a.resample("4h", origin="epoch").agg(AGG).dropna(); h4["t"] = h4.index; h4["ct"] = h4.t + pd.Timedelta("4h")
-        h4 = h4.reset_index(drop=True); h4 = h4[h4.ct <= pd.Timestamp.now(tz="UTC")].reset_index(drop=True)
-        if len(h4) < len(fallback): return fallback
-        _HTF[symbol] = (now, h4); return h4
-    except Exception:
-        _HTF[symbol] = (now - 5*3600, c[1] if c else fallback)   # retry in ~1h
-        return c[1] if c else fallback
+        if getattr(pv, "name", "") != "yfinance": return
+        tk = {pv.ticker(s): s for s in need}
+        raw = pv._dl(list(tk), "1h", "1y")   # time-capped download (YF_BUDGET_S)
+        for t, s in tk.items():
+            try:
+                a = pv._norm(raw[t] if t in raw.columns.get_level_values(0) else raw)
+                if len(a): _HTF[s] = (now, _h4_from(a))
+            except Exception: _HTF[s] = (now - 5*3600, _HTF[s][1]) if s in _HTF else None
+        for s in [k for k, v in _HTF.items() if v is None]: _HTF.pop(s)
+    except Exception: pass
+def htf_h4(symbol, fallback):
+    now = _time.time(); c = _HTF.get(symbol)
+    if c and len(c[1]) >= len(fallback): return c[1]
+    if c is None: prefetch_htf([symbol]); c = _HTF.get(symbol)
+    return c[1] if c and len(c[1]) >= len(fallback) else fallback
