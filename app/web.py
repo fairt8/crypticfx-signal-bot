@@ -1,6 +1,6 @@
 import threading
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
 from . import config as C, db, scanner, telegram, ai, summary, don20
@@ -23,6 +23,17 @@ def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode
     strength={k: round(v,3) for k,v in scanner.STATE.get("strength", {}).items()},
     universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled(), telegram_token_shape=telegram.token_shape(), min_post_score=C.MIN_POST_SCORE, strategies_enabled={"PAT-TRIPLE": C.ENABLE_PAT and "PAT-TRIPLE" in C.PAT_ENABLED, "PAT-WEDGE": C.ENABLE_PAT and "PAT-WEDGE" in C.PAT_ENABLED, "PAT-CUP": C.ENABLE_PAT and "PAT-CUP" in C.PAT_ENABLED, "BRK": C.ENABLE_BRK, "BRK_MARKETS": sorted(C.BRK_MARKETS), "BRK_LEVELS": C.BRK_LEVELS}, mf_strong_pair=scanner.STATE.get("mf_strong_pair"),
     instance=db.INSTANCE, scheduler_lease=db.kv_get("lease:scheduler"), scan_started=scanner.STATE.get("scan_started"), scan_errors=scanner.STATE.get("errors", [])[-5:], don20=dict(last_run=don20.STATE["last_run"], last_result=don20.STATE["last_result"], errors=don20.STATE["errors"][-5:]))
+@app.get("/api/trades")
+def trades_by_state(state: str = "open", period: str = "all"):
+    from . import trades
+    if state not in ("open", "closed", "pending", "new"): return JSONResponse({"error": "state must be open|closed|pending|new"}, 400)
+    if period not in trades.PERIODS: return JSONResponse({"error": "period must be day|week|month|all"}, 400)
+    rows = trades.by_state(state, period); cl = [r for r in rows if r.get("net_r") is not None]
+    return dict(state=state, period=period, count=len(rows), closed_net_r=round(sum(r["net_r"] for r in cl), 2),
+                open_live_net_r=round(sum(r.get("live_net_r") or 0 for r in rows if r["status"] == "open"), 2), rows=rows)
+@app.get("/api/trades/{symbol}")
+def trades_symbol(symbol: str):
+    from . import trades; return trades.history(symbol)
 @app.get("/api/don20")
 def don20_positions(): return don20.all_positions()
 @app.post("/api/scan")

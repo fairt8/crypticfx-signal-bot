@@ -97,7 +97,7 @@ CLOSED = ("tp", "sl", "be")   # be = TP1 hit (50% off), rest closed at entry
 COST = {"crypto": 0.001, "forex": 0.0002, "metal": 0.0005}   # same round-trip cost assumptions as the backtests
 def net_r(r):
     if r["result_r"] is None: return None
-    risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if r["symbol"] in ("XAUUSD","XAGUSD") else r["market"]
+    risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if str(r["symbol"]).startswith("XA") else r["market"]   # XAUUSD, XAGUSD, synthetic XAUAUD
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
 STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "⭐ CHK Varsity checklist [PRIMARY]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "FOREX MF-REJ [experimental – collecting live results]",
           "PAT-WEDGE": "PAT-WEDGE 4H wedge retest, 1:3 [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE 4H FX triple top/bottom retest, 1:1.5 [EXPERIMENTAL – paper]",

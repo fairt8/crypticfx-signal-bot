@@ -92,10 +92,85 @@ def post_group(rows):
         for r in rows: db.update(r["id"], posted=1)
 def post_signal(s):
     if s["confidence"] >= C.MIN_CONFIDENCE_TO_POST and send(fmt(s), html=True): db.update(s["id"], posted=1)
+# ---------- trade lists + PnL commands (app/trades.py) ----------
+def _wat(x):
+    from .trades import _ts
+    t = _ts(x); return (t + _td(hours=1)).strftime("%d %b %H:%M") if t else "?"
+def _sg(v, suf="", nd=2):
+    if v is None: return "–"
+    return f"{'🟩' if v > 0 else '🟥' if v < 0 else '⬜'} <b>{v:+.{nd}f}{suf}</b>"
+def _hdr(r):
+    d = "🟢 LONG" if r["direction"] == "long" else "🔴 SHORT"
+    sn = "FOREX MF-REJ" if r["strategy"] == "MF-REJ" else r["strategy"]
+    return f"{d}  <b>{esc(r['symbol'])}</b>  · <i>{esc(sn)}</i> #{r['id']}"
+def _live_line(r):
+    if r.get("price_now") is None: return f"{_hdr(r)}\n    📍 {code(r['entry'])} → <i>price unavailable</i>"
+    return (f"{_hdr(r)}\n    📍 {code(r['entry'])} → {code(r['price_now'])}   🛑 {code(r['sl'])}\n"
+            f"    {_sg(r['live_pct'], '%')}   {_sg(r['live_r'], 'R')}   <i>net {r['live_net_r']:+.2f}R</i>")
+def _closed_line(r):
+    ic = {"tp": "✅", "sl": "❌", "be": "➖"}.get(r["status"]) or ("✅" if (r.get("net_r") or 0) > 0 else "❌")
+    return f"{ic} {_hdr(r)}\n    {_sg(r.get('net_r'), 'R')}   {_sg(r.get('net_pct'), '%')}   <i>closed {_wat(r['closed_at'])} WAT</i>"
+PLBL = {"day": "today (24h)", "today": "today (24h)", "week": "last 7 days", "month": "last 30 days", "all": "all time"}
+def cmd_trades_state(state, arg):
+    from . import trades as T
+    per = (arg or "all").split()[0].lower() if arg else "all"
+    if per not in T.PERIODS: return f"Period must be one of: day, week, month, all"
+    rows = T.by_state(state, per); L = []
+    if state == "open":
+        rows.sort(key=lambda r: -(r.get("live_net_r") if r.get("live_net_r") is not None else -99))
+        tot = sum(r.get("live_net_r") or 0 for r in rows); up = sum((r.get("live_r") or 0) > 0 for r in rows)
+        L = [f"📈 <b>Currently trading</b> ({len(rows)} open)", f"💰 Live total {_sg(tot, 'R')} net   ·   🟩 {up} in profit / 🟥 {len(rows)-up}", "━━━━━━━━━━━━"]
+        L += [_live_line(r) + "\n" for r in rows] or ["No open trades."]
+    elif state == "closed":
+        w = sum((r.get("result_r") or 0) > 0 for r in rows); n = sum(r.get("net_r") or 0 for r in rows)
+        L = [f"🏁 <b>Closed trades</b> · {PLBL[per]} ({len(rows)})",
+             f"🎯 Win {round(100*w/len(rows)) if rows else 0}%   ·   💰 {_sg(n, 'R')} net (after fees)", "━━━━━━━━━━━━"]
+        L += [_closed_line(r) + "\n" for r in rows] or ["No closed trades in this period."]
+    elif state == "pending":
+        L = [f"⏳ <b>Pending</b> – signalled, entry not hit yet · {PLBL[per]} ({len(rows)})", "<i>Limit entries expire if not filled in time.</i>", "━━━━━━━━━━━━"]
+        L += [f"{_hdr(r)}\n    📍 entry {code(r['entry'])}   🛑 {code(r['sl'])}   🎯 {code(r['tp'])}\n    <i>signalled {_wat(r['created_at'])} WAT</i>\n" for r in rows] or ["Nothing pending."]
+    else:
+        L = [f"🆕 <b>New signals</b> · {PLBL[per]} ({len(rows)})", "━━━━━━━━━━━━"]
+        st = {"pending": "⏳ pending", "open": "📈 open", "tp": "✅ TP", "sl": "❌ SL", "be": "➖ BE", "expired": "⌛ expired", "closed": "🏁 closed"}
+        for r in rows:
+            x = f"{_hdr(r)}\n    {st.get(r['status'], esc(r['status']))}   📍 {code(r['entry'])}   <i>{_wat(r['created_at'])} WAT</i>"
+            if r.get("live_r") is not None: x += f"\n    live {_sg(r['live_pct'], '%')} {_sg(r['live_r'], 'R')}"
+            if r.get("net_r") is not None: x += f"\n    result {_sg(r['net_r'], 'R')} {_sg(r['net_pct'], '%')}"
+            L.append(x + "\n")
+        if not rows: L.append("No new signals in this period.")
+    return "\n".join(L)
+def cmd_symbol(arg, full):
+    from . import trades as T
+    if not arg: return f"Usage: /{'trades' if full else 'pnl'} SYMBOL  (e.g. BTCUSDT, BTC, EURUSD, XAUAUD)"
+    h = T.history(arg.split()[0]); s = h["summary"]; rows = h["trades"]
+    if not rows: return f"No trades found for <b>{esc(s['symbol'])}</b>."
+    L = [f"🔎 <b>{esc(s['symbol'])}</b>  {'trade history' if full else 'PnL'}",
+         f"📊 {s['trades']} signals · 📈 {s['open']} open · ⏳ {s['pending']} pending · 🏁 {s['closed']} closed",
+         f"🎯 Win {s['win_rate'] if s['win_rate'] is not None else '–'}%   ·   💰 closed {_sg(s['net_r'], 'R')} ({s['net_pct']:+.2f}%) net",
+         f"⚡ Open now {_sg(s['open_live_net_r'], 'R')} net (live)", "━━━━━━━━━━━━"]
+    op = [r for r in rows if r["status"] == "open"]
+    if op: L += ["<b>Open</b>"] + [_live_line(r) + "\n" for r in op]
+    cl = [r for r in rows if r.get("net_r") is not None]
+    if cl: L += ["<b>Closed</b>"] + [_closed_line(r) + "\n" for r in (cl if full else cl[:10])]
+    if full:
+        other = [r for r in rows if r["status"] not in ("open",) and r.get("net_r") is None]
+        if other: L += ["<b>Other</b>"] + [f"{_hdr(r)}  · {esc(r['status'])}  <i>{_wat(r['created_at'])} WAT</i>" for r in other]
+    return "\n".join(L)
+HTML_CMDS = ("/signals", "/open", "/closed", "/pending", "/new", "/pnl", "/trades", "/help", "/start")
+HELP_HTML = ("🤖 <b>CrypticFx signal bot</b>\n\n"
+    "📈 /open – currently trading, live PnL (% and R)\n"
+    "🏁 /closed [day|week|month|all] – closed trades, net R and %\n"
+    "⏳ /pending [day|week|month|all] – signalled, entry not hit yet\n"
+    "🆕 /new [day|week|month|all] – new signals\n"
+    "💰 /pnl SYMBOL – live + closed PnL for one token\n"
+    "📜 /trades SYMBOL – full trade history of one token\n\n"
+    "/signals – open/pending signal cards\n/history [days] – last results\n/stats – 30-day stats\n/explain &lt;id&gt; – AI explanation\n/ask &lt;question&gt; – ask AI")
 HELP = "/signals – open/pending signals\n/history [days] – last results (default 7)\n/stats – 30-day stats\n/explain <id> – AI explanation\n/ask <question> – ask AI about recent signals"
 def handle(text, chat):
     parts = text.split(maxsplit=1); cmd = parts[0].split("@")[0].lower(); arg = parts[1] if len(parts) > 1 else ""
-    if cmd in ("/start","/help"): return f"Signal bot ready. Your chat id: {chat}\n"+HELP
+    if cmd in ("/start","/help"): return HELP_HTML
+    if cmd in ("/open", "/closed", "/pending", "/new"): return cmd_trades_state(cmd[1:], arg)
+    if cmd in ("/pnl", "/trades"): return cmd_symbol(arg, cmd == "/trades")
     if cmd == "/signals":
         rs = [r for r in db.recent(3) if r["status"] in ("pending","open")][:10]
         return "\n\n".join(fmt(r) for r in rs) or "No open signals."
@@ -112,13 +187,32 @@ def handle(text, chat):
         return ai.explain(s) if s else "Usage: /explain <id>"
     if cmd == "/ask": return ai.chat(arg or "Summarise", "\n".join(str(r) for r in db.recent(2)[:20]))
     return HELP
+def chunks(text, n=3900):
+    """Split on line boundaries so each Telegram message stays under 4096 chars (HTML tags are per-line, so never cut)."""
+    out, cur = [], ""
+    for ln in text.split("\n"):
+        while len(ln) > n: out.append(cur) if cur else None; cur = ""; out.append(ln[:n]); ln = ln[n:]
+        if len(cur) + len(ln) + 1 > n: out.append(cur); cur = ln
+        else: cur = (cur + "\n" + ln) if cur else ln
+    if cur: out.append(cur)
+    return [c for c in out if c.strip()]
+def send_long(text, chat_id=None, html=False):
+    ok = True
+    for c in chunks(text): ok = send(c, chat_id, html=html) and ok
+    return ok
+def allowed_chat(chat):
+    """Only the owner chat (TELEGRAM_CHAT_ID) gets answers."""
+    return bool(C.TELEGRAM_CHAT_ID) and str(chat) == str(C.TELEGRAM_CHAT_ID).strip()
 def process_update(u):
     m = u.get("message") or {}
     if m.get("text","").startswith("/"):
+        chat = (m.get("chat") or {}).get("id")
+        if not allowed_chat(chat): return
         try:
-            out = handle(m["text"], m["chat"]["id"])
-            send(out, m["chat"]["id"], html=m["text"].split()[0].split("@")[0].lower() == "/signals")
-        except Exception as e: send(f"Error: {e}", m["chat"]["id"])
+            cmd = m["text"].split()[0].split("@")[0].lower(); out = handle(m["text"], chat)
+            html = cmd in HTML_CMDS
+            send_long(out if html else out, chat, html=html)
+        except Exception as e: send(f"Error: {type(e).__name__}: {e}"[:500], chat)
 def poll_forever():
     off = 0
     while True:

@@ -21,12 +21,21 @@ tbody tr:hover{background:#1c2638}td:last-child{white-space:normal}
 button,select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}button{background:var(--blu);border:0;cursor:pointer;font-weight:600}button:hover{filter:brightness(1.1)}
 details{font-size:12px;color:var(--mut)}summary{cursor:pointer}
 @media(max-width:640px){body{padding:12px}h1{font-size:18px}.card b{font-size:20px}th,td{padding:7px 8px}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.tab{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}.tab.on{background:var(--blu);border-color:var(--blu)}
+input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;width:130px}
 </style></head><body>
 <h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · live: crypto FVG with setup score ≥ 70 only (older rows may include forex/CHK)</span></h1>
 <div class="muted" id="meta"></div>
 <div class="cards" id="cards"></div>
 <div class="tw"><table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table></div>
 <h3>⭐ DON20 open positions <span class="prim">PRIMARY</span></h3><div class="tw"><table style="max-width:900px"><thead><tr><th>#</th><th>Coin</th><th>Side</th><th>Opened</th><th>Entry</th><th>Initial stop</th><th>Trailing stop</th><th>Status</th><th>R (net)</th></tr></thead><tbody id="don20"></tbody></table></div>
+<h3>📊 Trades &amp; PnL</h3>
+<div class="tabs"><button class="tab on" data-s="open">📈 Currently trading</button><button class="tab" data-s="pending">⏳ Pending</button><button class="tab" data-s="new">🆕 New signals</button><button class="tab" data-s="closed">🏁 Closed</button>
+ <span class="filters" style="margin:0 0 0 8px">Period <select id="tp"><option value="day">day</option><option value="week">week</option><option value="month">month</option><option value="all" selected>all</option></select>
+ Token <input id="tsym" placeholder="e.g. BTCUSDT"><button onclick="lookup()">Look up</button></span></div>
+<div class="cards" id="tcards"></div>
+<div class="tw"><table><thead id="thead"></thead><tbody id="trows"><tr><td class="muted">Loading…</td></tr></tbody></table></div>
+<p class="muted">Pending = signalled, limit entry not hit yet (expires if unfilled). Live PnL uses the latest price (60s cache; forex via Yahoo, XAUAUD = XAUUSD/AUDUSD). Net = after the same fees as the stats.</p>
 <div class="filters">Strategy <select id="sg"><option value="">all</option><option value="FVG">FVG (live)</option><option value="FVG+TREND">FVG + 4H trend [EXP]</option><option value="CHK">⭐ CHK [PRIMARY]</option><option value="FVG-PLAN">FVG plan [EXP]</option><option value="FVG-D1">FVG-D1 [EXP]</option><option value="MF-REJ">FOREX MF-REJ [EXP]</option><option value="PAT-WEDGE">PAT-WEDGE [EXP]</option><option value="PAT-TRIPLE">PAT-TRIPLE [EXP]</option><option value="PAT-CUP">PAT-CUP [EXP]</option><option value="BRK">BRK [EXP]</option></select>
  Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
  Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>be</option><option>expired</option></select>
@@ -54,4 +63,32 @@ function render(){const sg=document.getElementById('sg').value,mk=document.getEl
 document.getElementById('mk').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
 async function scan(){await fetch('/api/scan',{method:'POST'});load();}
 load();setInterval(load,60000);
+let TS='open';
+const pc=(v,s='')=>v==null?'—':`<b class="${v>0?'pos':v<0?'neg':''}">${v>0?'+':''}${(+v).toFixed(2)}${s}</b>`;
+const side=d=>`<span class="badge ${d}">${d=="long"?"▲":"▼"} ${d.toUpperCase()}</span>`;
+const stp=s=>`<span class="pill ${s}">${s}</span>`;
+function tcard(a){document.getElementById('tcards').innerHTML=a.map(([k,v,c])=>`<div class="card"><span class="muted">${k}</span><b class="${c||''}">${v}</b></div>`).join('')}
+function trow(r,mode){const sym=`<a href="#" style="color:inherit" onclick="lookup('${r.symbol}');return false">${r.symbol}</a> <span class="muted">${r.market}</span>`;
+ const base=`<td>${r.id}</td><td>${sym}</td><td>${side(r.direction)}</td><td>${r.strategy=='MF-REJ'?'FOREX MF-REJ':r.strategy}</td><td>${f(r.entry)}</td>`;
+ if(mode=='open')return `<tr>${base}<td>${r.sl==null?'':f(r.sl)}</td><td>${r.price_now==null?'—':f(r.price_now)}</td><td>${pc(r.live_pct,'%')}</td><td>${pc(r.live_r,'R')}</td><td>${pc(r.live_net_r,'R')}</td><td>${t(r.filled_at||r.created_at)}</td></tr>`;
+ if(mode=='pending')return `<tr>${base}<td>${f(r.sl)}</td><td>${r.tp==null?'':f(r.tp)}</td><td>${t(r.created_at)}</td></tr>`;
+ if(mode=='closed')return `<tr>${base}<td>${stp(r.status)}</td><td>${pc(r.result_r,'R')}</td><td>${pc(r.net_r,'R')}</td><td>${pc(r.net_pct,'%')}</td><td>${r.closed_at?t(r.closed_at):'—'}</td></tr>`;
+ return `<tr>${base}<td>${stp(r.status)}</td><td>${r.status=='open'?pc(r.live_net_r,'R')+' <span class="muted">live</span>':pc(r.net_r,'R')}</td><td>${r.status=='open'?pc(r.live_pct,'%'):pc(r.net_pct,'%')}</td><td>${t(r.created_at)}</td></tr>`;}
+const TH={open:['#','Token','Side','Strategy','Entry','Stop','Price now','Live %','Live R','Live net R','Entered'],pending:['#','Token','Side','Strategy','Entry','Stop','TP','Signalled'],
+ closed:['#','Token','Side','Strategy','Entry','Result','Gross R','Net R','Net %','Closed'],new:['#','Token','Side','Strategy','Entry','Status','Net R','%','Signalled']};
+async function tload(){const per=document.getElementById('tp').value;const d=await (await fetch(`/api/trades?state=${TS}&period=${per}`)).json();const rows=d.rows||[];
+ document.getElementById('thead').innerHTML='<tr>'+TH[TS].map(x=>`<th>${x}</th>`).join('')+'</tr>';
+ document.getElementById('trows').innerHTML=rows.map(r=>trow(r,TS)).join('')||`<tr><td colspan=11 class="muted">Nothing here for this period</td></tr>`;
+ if(TS=='open'){const up=rows.filter(r=>(r.live_r||0)>0).length;tcard([['Open trades',rows.length],['In profit',up,'pos'],['In loss',rows.length-up,'neg'],['Live net R',(d.open_live_net_r>0?'+':'')+d.open_live_net_r,d.open_live_net_r>0?'pos':d.open_live_net_r<0?'neg':'']])}
+ else if(TS=='closed'){const w=rows.filter(r=>(r.result_r||0)>0).length;tcard([['Closed',rows.length],['Win rate',rows.length?Math.round(100*w/rows.length)+'%':'—'],['Net R',d.closed_net_r,d.closed_net_r>0?'pos':d.closed_net_r<0?'neg':'']])}
+ else tcard([[TS=='new'?'New signals':'Pending',rows.length]]);}
+async function lookup(sym){sym=sym||document.getElementById('tsym').value;if(!sym)return;document.getElementById('tsym').value=sym;
+ const d=await (await fetch('/api/trades/'+encodeURIComponent(sym))).json();const s=d.summary,rows=d.trades||[];
+ document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
+ tcard([['Token',s.symbol],['Signals',s.trades],['Open',s.open],['Closed',s.closed],['Win rate',s.win_rate==null?'—':s.win_rate+'%'],['Closed net R',s.net_r,s.net_r>0?'pos':s.net_r<0?'neg':''],['Open live net R',s.open_live_net_r,s.open_live_net_r>0?'pos':s.open_live_net_r<0?'neg':'']]);
+ document.getElementById('thead').innerHTML='<tr>'+['#','Token','Side','Strategy','Entry','Status','Net R','%','Signalled'].map(x=>`<th>${x}</th>`).join('')+'</tr>';
+ document.getElementById('trows').innerHTML=rows.map(r=>trow(r,'new')).join('')||'<tr><td colspan=9 class="muted">No trades for this token</td></tr>';}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{TS=b.dataset.s;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x==b));tload()});
+document.getElementById('tp').onchange=tload;document.getElementById('tsym').onkeydown=e=>{if(e.key=='Enter')lookup()};
+tload();setInterval(()=>{if(document.querySelector('.tab.on'))tload()},60000);
 </script></body></html>
