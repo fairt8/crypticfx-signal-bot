@@ -26,11 +26,17 @@ def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode
 @app.get("/api/trades")
 def trades_by_state(state: str = "open", period: str = "all"):
     from . import trades
-    if state not in ("open", "closed", "pending", "new"): return JSONResponse({"error": "state must be open|closed|pending|new"}, 400)
+    if state not in ("open", "closed", "pending", "new", "retired"): return JSONResponse({"error": "state must be open|closed|pending|new|retired"}, 400)
     if period not in trades.PERIODS: return JSONResponse({"error": "period must be day|week|month|all"}, 400)
     rows = trades.by_state(state, period); cl = [r for r in rows if r.get("net_r") is not None]
     return dict(state=state, period=period, count=len(rows), closed_net_r=round(sum(r["net_r"] for r in cl), 2),
                 open_live_net_r=round(sum(r.get("live_net_r") or 0 for r in rows if r["status"] == "open"), 2), rows=rows)
+@app.get("/api/don20/pnl")
+def don20_pnl():
+    from . import trades; return trades.don20_pnl()
+@app.get("/api/strategies")
+def strategies_list():
+    from . import strategies; return strategies.listing()
 @app.get("/api/trades/{symbol}")
 def trades_symbol(symbol: str):
     from . import trades; return trades.history(symbol)

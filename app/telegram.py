@@ -27,15 +27,13 @@ def fmt(s):
     e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"
     tags = s.get("tags") or ["FVG"]; mf = s.get("strategy") == "MF-REJ"
     if s.get("strategy") in PATS: return fmt_pat(s)
-    exp = mf or s.get("experimental") or "FVG+TREND" in tags or "FVG-D1" in tags
-    strat = NAMES["MF-REJ"] if mf else " + ".join(NAMES.get(t, t) for t in tags)
+    from . import strategies as SG
+    k = SG.eff(s.get("strategy"), tags); strat = SG.name(k)
     if mf: strat += "  " + mf_label(s.get("symbol"))
     entry_lbl = "Entry (market, 1H close)" if s.get("strategy") in ("CHK", "MF-REJ") else "Entry (limit)"
     L = []
-    if s.get("strategy") == "CHK": L.append("⭐ <b>PRIMARY</b>")
-    elif mf: L.append("🧪 <b>experimental – collecting live results</b>")
-    elif exp: L.append("🧪 <b>EXPERIMENTAL – paper test</b>")
-    L += [f"🏷 <b>{esc(strat)}</b>", "", f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", ""]
+    L.append(f"<b>{SG.label(k)}</b>" + ("  <i>– collecting live results</i>" if SG.status(k) == "experimental" else ""))
+    L += [f"🏷 <b>Strategy: {esc(strat)}</b>", "", f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", ""]
     L.append(f"📍 <b>{esc(entry_lbl)}:</b> {code(s['entry'])}")
     L.append(f"🛑 <b>Stop:</b> {code(s['sl'])}")
     if mf:
@@ -58,7 +56,9 @@ def fmt(s):
 def fmt_pat(s):
     e = "🟢 <b>LONG</b>" if s["direction"] == "long" else "🔴 <b>SHORT</b>"; sd = 1 if s["direction"] == "long" else -1
     risk = abs(s["entry"] - s["sl"]); tp1 = s["entry"] + sd*1.5*risk; tp2 = s["entry"] + sd*3*risk; tr = float(s["rr"])
-    L = ["🧪 <b>EXPERIMENTAL – paper</b>", f"🏷 <b>{NAMES.get(s['strategy'], esc(s['strategy']))}</b>", "",
+    from . import strategies as SG
+    L = [f"<b>{SG.label(s['strategy'])}</b>" + ("  <i>– paper test</i>" if SG.status(s['strategy']) == "experimental" else ""),
+         f"🏷 <b>Strategy: {esc(SG.name(s['strategy']))}</b>", "",
          f"{e}  <b>{esc(s['symbol'])}</b>  <i>({esc(s['market'])})</i>  #{esc(s['id'])}", "",
          f"📍 <b>Entry (market, 4H close):</b> {code(s['entry'])}", f"🛑 <b>Stop:</b> {code(s['sl'])}",
          f"🎯 <b>TP1 (1:1.5):</b> {code(tp1)}" + ("  ✅ <i>tracked</i>" if tr == 1.5 else ""),
@@ -83,10 +83,11 @@ def send(text, chat_id=None, html=False):
 def post_group(rows):
     rows = [r for r in rows if r["confidence"] >= C.MIN_CONFIDENCE_TO_POST]
     if not rows: return
-    rows.sort(key=lambda r: r["strategy"] != "FVG")   # live FVG first
+    from . import strategies as SG
+    rows.sort(key=lambda r: ("FVG-D1", "FVG", "FVG-PLAN").index(r["strategy"]) if r["strategy"] in ("FVG-D1", "FVG", "FVG-PLAN") else 9)
     text = fmt(rows[0])
     for r in rows[1:]:
-        text += (f"\n\n━━━━━━━━━━━━\n🧪 <b>EXPERIMENTAL – paper test</b>\nSame setup, <b>{esc(r['strategy'])}</b> levels (#{r['id']}):\n"
+        text += (f"\n\n━━━━━━━━━━━━\n<b>{SG.label(r['strategy'])}</b>\nSame setup, <b>{esc(SG.name(r['strategy']))}</b> levels (#{r['id']}):\n"
                  f"📍 Entry {code(r['entry'])}\n🛑 Stop {code(r['sl'])}\n🎯 Target {code(r['tp'])}")
     if send(text, html=True):
         for r in rows: db.update(r["id"], posted=1)
@@ -101,14 +102,15 @@ def _sg(v, suf="", nd=2):
     return f"{'🟩' if v > 0 else '🟥' if v < 0 else '⬜'} <b>{v:+.{nd}f}{suf}</b>"
 def _hdr(r):
     d = "🟢 LONG" if r["direction"] == "long" else "🔴 SHORT"
+    from . import strategies as SG
     sn = "FOREX MF-REJ" if r["strategy"] == "MF-REJ" else r["strategy"]
-    return f"{d}  <b>{esc(r['symbol'])}</b>  · <i>{esc(sn)}</i> #{r['id']}"
+    return f"{d}  <b>{esc(r['symbol'])}</b>  · <i>{esc(sn)}</i> {SG.label(r['strategy']).split()[0]} #{r['id']}"
 def _live_line(r):
     if r.get("price_now") is None: return f"{_hdr(r)}\n    📍 {code(r['entry'])} → <i>price unavailable</i>"
     return (f"{_hdr(r)}\n    📍 {code(r['entry'])} → {code(r['price_now'])}   🛑 {code(r['sl'])}\n"
             f"    {_sg(r['live_pct'], '%')}   {_sg(r['live_r'], 'R')}   <i>net {r['live_net_r']:+.2f}R</i>")
 def _closed_line(r):
-    ic = {"tp": "✅", "sl": "❌", "be": "➖"}.get(r["status"]) or ("✅" if (r.get("net_r") or 0) > 0 else "❌")
+    ic = {"tp": "✅", "sl": "❌", "be": "➖", "cancelled": "🚫"}.get(r["status"]) or ("✅" if (r.get("net_r") or 0) > 0 else "❌")
     return f"{ic} {_hdr(r)}\n    {_sg(r.get('net_r'), 'R')}   {_sg(r.get('net_pct'), '%')}   <i>closed {_wat(r['closed_at'])} WAT</i>"
 TG_MAX = 40   # rows per Telegram list (totals always cover all rows)
 PLBL = {"day": "today (24h)", "today": "today (24h)", "week": "last 7 days", "month": "last 30 days", "all": "all time"}
@@ -134,8 +136,9 @@ def cmd_trades_state(state, arg):
         L = [f"⏳ <b>Pending</b> – signalled, entry not hit yet · {PLBL[per]} ({len(rows)})", "<i>Limit entries expire if not filled in time.</i>", "━━━━━━━━━━━━"]
         L += [f"{_hdr(r)}\n    📍 entry {code(r['entry'])}   🛑 {code(r['sl'])}   🎯 {code(r['tp'])}\n    <i>signalled {_wat(r['created_at'])} WAT</i>\n" for r in rows[:TG_MAX]] or ["Nothing pending."]
     else:
-        L = [f"🆕 <b>New signals</b> · {PLBL[per]} ({len(rows)})", "━━━━━━━━━━━━"]
-        st = {"pending": "⏳ pending", "open": "📈 open", "tp": "✅ TP", "sl": "❌ SL", "be": "➖ BE", "expired": "⌛ expired", "closed": "🏁 closed"}
+        L = [f"🆕 <b>New signals</b> · {PLBL[per]} ({len(rows)})" if state == "new" else
+             f"🗄 <b>Retired strategies</b> – history · {PLBL[per]} ({len(rows)})\n<i>FVG (live), FVG+TREND, PAT-WEDGE, PAT-CUP: no new signals; code kept for backtests.</i>", "━━━━━━━━━━━━"]
+        st = {"retired": "🗄 closed (retired)", "cancelled": "🚫 cancelled", "pending": "⏳ pending", "open": "📈 open", "tp": "✅ TP", "sl": "❌ SL", "be": "➖ BE", "expired": "⌛ expired", "closed": "🏁 closed"}
         for r in rows[:TG_MAX]:
             x = f"{_hdr(r)}\n    {st.get(r['status'], esc(r['status']))}   📍 {code(r['entry'])}   <i>{_wat(r['created_at'])} WAT</i>"
             if r.get("live_r") is not None: x += f"\n    live {_sg(r['live_pct'], '%')} {_sg(r['live_r'], 'R')}"
@@ -161,23 +164,41 @@ def cmd_symbol(arg, full):
         other = [r for r in rows if r["status"] not in ("open",) and r.get("net_r") is None]
         if other: L += ["<b>Other</b>"] + [f"{_hdr(r)}  · {esc(r['status'])}  <i>{_wat(r['created_at'])} WAT</i>" for r in other]
     return "\n".join(L)
-HTML_CMDS = ("/signals", "/open", "/closed", "/pending", "/new", "/pnl", "/trades", "/help", "/start")
+def cmd_don20():
+    from . import trades as T
+    d = T.don20_pnl()
+    return "\n".join([f"⭐ <b>DON20 live PnL</b>  <i>(PRIMARY)</i>", f"⏰ as of {wat(d['as_of'])}" + (f" · since {_wat(d['since'])} WAT" if d['since'] else ""), "━━━━━━━━━━━━",
+        f"🏁 Closed: {d['closed']}  ·  {_sg(d['closed_net_r'], 'R')} net" + (f"  ·  win {d['closed_win_rate']}%" if d['closed_win_rate'] is not None else ""),
+        f"📈 Open: {d['open']}  ·  {_sg(d['open_live_net_r'], 'R')} net live  ·  🟩 {d['open_in_profit']} in profit",
+        f"💰 <b>Total</b> {_sg(d['total_net_r'], 'R')} net (closed + open live)"])
+def cmd_strategies():
+    from . import strategies as SG
+    L = ["🧭 <b>Strategies</b>", "━━━━━━━━━━━━"]
+    for r in SG.listing(): L.append(f"{r['label']} · {esc(r['name'])}")
+    return "\n".join(L)
+HTML_CMDS = ("/signals", "/open", "/closed", "/pending", "/new", "/retired", "/don20", "/strategies", "/pnl", "/trades", "/help", "/start")
 HELP_HTML = ("🤖 <b>CrypticFx signal bot</b>\n\n"
     "📈 /open – currently trading, live PnL (% and R)\n"
     "🏁 /closed [day|week|month|all] – closed trades, net R and %\n"
     "⏳ /pending [day|week|month|all] – signalled, entry not hit yet\n"
     "🆕 /new [day|week|month|all] – new signals\n"
     "💰 /pnl SYMBOL – live + closed PnL for one token\n"
-    "📜 /trades SYMBOL – full trade history of one token\n\n"
+    "📜 /trades SYMBOL – full trade history of one token\n"
+    "🗄 /retired [day|week|month|all] – history of retired strategies\n"
+    "⭐ /don20 – DON20 total PnL (closed + open live)\n"
+    "🧭 /strategies – active strategies and labels\n\n"
     "/signals – open/pending signal cards\n/history [days] – last results\n/stats – 30-day stats\n/explain &lt;id&gt; – AI explanation\n/ask &lt;question&gt; – ask AI")
 HELP = "/signals – open/pending signals\n/history [days] – last results (default 7)\n/stats – 30-day stats\n/explain <id> – AI explanation\n/ask <question> – ask AI about recent signals"
 def handle(text, chat):
     parts = text.split(maxsplit=1); cmd = parts[0].split("@")[0].lower(); arg = parts[1] if len(parts) > 1 else ""
     if cmd in ("/start","/help"): return HELP_HTML
-    if cmd in ("/open", "/closed", "/pending", "/new"): return cmd_trades_state(cmd[1:], arg)
+    if cmd in ("/open", "/closed", "/pending", "/new", "/retired"): return cmd_trades_state(cmd[1:], arg)
+    if cmd == "/don20": return cmd_don20()
+    if cmd == "/strategies": return cmd_strategies()
     if cmd in ("/pnl", "/trades"): return cmd_symbol(arg, cmd == "/trades")
     if cmd == "/signals":
-        rs = [r for r in db.recent(3) if r["status"] in ("pending","open")][:10]
+        from . import strategies as SG
+        rs = [r for r in db.recent(3) if r["status"] in ("pending","open") and SG.active(SG.eff(r["strategy"], r["tags"]))][:10]
         return "\n\n".join(fmt(r) for r in rs) or "No open signals."
     if cmd == "/history":
         d = int(arg) if arg.isdigit() else 7

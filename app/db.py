@@ -93,7 +93,7 @@ def row(r):
     try: d["tp2"] = d["entry"] + (3.0 if d["direction"] == "long" else -3.0) * abs(d["entry"] - d["sl"])   # TP2 (1:3), display only
     except Exception: d["tp2"] = None
     return d
-CLOSED = ("tp", "sl", "be")   # be = TP1 hit (50% off), rest closed at entry
+CLOSED = ("tp", "sl", "be", "retired")   # be = TP1 hit (50% off), rest at entry; retired = closed at market when its strategy was retired
 COST = {"crypto": 0.001, "forex": 0.0002, "metal": 0.0005}   # same round-trip cost assumptions as the backtests
 def net_r(r):
     if r["result_r"] is None: return None
@@ -103,17 +103,20 @@ STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CH
           "PAT-WEDGE": "PAT-WEDGE 4H wedge retest, 1:3 [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE 4H FX triple top/bottom retest, 1:1.5 [EXPERIMENTAL – paper]",
           "PAT-CUP": "PAT-CUP 4H cup & handle retest, 1:3 [EXPERIMENTAL – paper]", "BRK": "BRK 4H crypto neckline/trendline breakout, 1:3 [EXPERIMENTAL – paper]"}
 def by_strategy(days=60):
+    from . import strategies as SG
     rs = recent(days, 20000); out = {}
-    for k, label in STRATS.items():
-        sub = [r for r in rs if k in r["tags"]]; cl = [r for r in sub if r["status"] in CLOSED]
+    for k in STRATS:
+        label = SG.full(k)
+        sub = [r for r in rs if k in r["tags"] or r.get("strategy") == k]; cl = [r for r in sub if r["status"] in CLOSED]
         w = sum((r["result_r"] or 0) > 0 for r in cl); nets = [net_r(r) for r in cl]
-        out[k] = dict(label=label, signals=len(sub), closed=len(cl), open=sum(r["status"] in ("open","pending") for r in sub),
+        out[k] = dict(label=label, status=SG.status(k), signals=len(sub), closed=len(cl), open=sum(r["status"] in ("open","pending") for r in sub),
             win_rate=round(100*w/len(cl),1) if cl else None, gross_r=round(sum(r["result_r"] for r in cl),2),
             net_r=round(sum(nets),2), net_per_trade=round(sum(nets)/len(cl),3) if cl else None)
     try:
-        from . import don20; out = {"CHK": out.pop("CHK"), "DON20": don20.summary(), **{k: out.pop(k) for k in ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")}, **out}   # PRIMARY strategies first
-    except Exception as e: out["DON20"] = dict(label="DON20 [EXPERIMENTAL – paper test]", signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
-    return out
+        from . import don20; out["DON20"] = dict(don20.summary(), label=SG.full("DON20"), status=SG.status("DON20"))
+    except Exception as e: out["DON20"] = dict(label=SG.full("DON20"), status="primary", signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
+    rank = {s: i for i, s in enumerate(SG.ORDER)}   # PRIMARY, NORMAL, EXPERIMENTAL, then RETIRED
+    return dict(sorted(out.items(), key=lambda kv: (rank.get(kv[1].get("status"), 9), list(SG.STATUS).index(kv[0]) if kv[0] in SG.STATUS else 99)))
 def stats(days=30):
     rs = recent(days, 10000); closed = [r for r in rs if r["status"] in CLOSED]
     w = sum((r["result_r"] or 0) > 0 for r in closed)

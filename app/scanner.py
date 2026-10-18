@@ -35,10 +35,14 @@ def patterns_for(data, market, found, budget_end):
 def qualifies(sig):
     """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
     if sig.get("strategy") == "MF-REJ" or sig.get("strategy") in PAT_STRATS: return True   # own rules; MIN_POST_SCORE does not apply   # own forex strategy with its own filters (session, bias, range, 2/day)
-    return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
+    return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-D1", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
 
 def scan(crypto=True, fx=True, post=True, gen=None):
     t0 = time.time(); found = []; cache = {}; watch = []
+    try:
+        from . import trades; n = trades.retire_close()   # close open/pending trades of retired strategies at market (idempotent)
+        if n: print(f"[scan] retired strategies: closed {n} trades", flush=True)
+    except Exception as e: STATE["errors"].append(f"retire_close: {e}")
     if crypto:
         try: data = binance.fetch_many(crypto_universe())
         except Exception as e: STATE["errors"].append(f"crypto universe: {e}"); data = {}
@@ -46,11 +50,12 @@ def scan(crypto=True, fx=True, post=True, gen=None):
         for s,(h4,m5,h1) in data.items():
             try:
                 sig = strategy.analyze(s, "crypto", h4, m5)
-                if sig and C.ENABLE_D1 and "crypto" in C.EXPERIMENTAL_MARKETS:
+                if sig and C.ENABLE_D1 and "crypto" in C.EXPERIMENTAL_MARKETS and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE:
                     b = strategy.daily_bias(binance.daily(s))   # only fetched when a setup exists (cached 6h)
-                    if b == sig["direction"]:
-                        sig["tags"] = sig["tags"] + ["FVG-D1"]; sig["reasons"].append(f"Daily structure bias {b} (FVG-D1 [EXPERIMENTAL])")
-                if sig: found.append(sig)
+                    if b == sig["direction"]:   # FVG-D1 (NORMAL): same setup/levels as FVG, only when the daily structure agrees
+                        found.append(dict(sig, strategy="FVG-D1", tags=["FVG-D1"], experimental=0,
+                                          reasons=["FVG-D1 [NORMAL]"] + sig["reasons"][1:] + [f"Daily structure bias {b} agrees (FVG-D1)"]))
+                if sig and C.ENABLE_FVG_LIVE: found.append(sig)   # plain FVG (live): RETIRED
                 if sig and C.ENABLE_FVG_PLAN and "crypto" in C.EXPERIMENTAL_MARKETS:
                     pv = strategy.plan_variant(sig)
                     if pv: found.append(pv)
@@ -124,7 +129,7 @@ def scan(crypto=True, fx=True, post=True, gen=None):
         if i: new.append(db.get(i))
     if post:   # one Telegram post per setup: FVG + FVG-PLAN rows from the same setup are posted together
         groups = {}
-        for s in new: groups.setdefault((s["symbol"], s["confirm_time"], s["strategy"] in ("FVG", "FVG-PLAN")), []).append(s)
+        for s in new: groups.setdefault((s["symbol"], s["confirm_time"], s["strategy"] in ("FVG", "FVG-D1", "FVG-PLAN")), []).append(s)
         for g in groups.values():
             try: telegram.post_group(g)
             except Exception as e: STATE["errors"].append(f"telegram: {e}")

@@ -161,7 +161,7 @@ def analyze_chk(symbol, market, h4, h1, max_age_min=60, sr_atr=0.5):
     r_ = rsi(h1.c).iloc[i]; mh = macd_hist(h1.c).iloc[i]
     ind = int((r_ < 70) if d=="long" else (r_ > 30)) + int((mh > 0) == (d=="long"))
     why.append(f"Checklist 5: indicators confirming {ind}/2 (RSI {r_:.0f}, MACD hist {'+' if mh>0 else '-'})")
-    why.append(f"Checklist 6: RR 1:{C.RR:g}. EXPERIMENTAL: backtest crypto −0.20R in-sample / +0.16R out-of-sample per trade (net)")
+    why.append(f"Checklist 6: RR 1:{C.RR:g}. Backtest crypto −0.20R in-sample / +0.16R out-of-sample per trade (net)")
     tp = entry + C.RR*risk if d=="long" else entry - C.RR*risk
     return dict(symbol=symbol, market=market, direction=d, entry=entry, sl=sl, tp=float(tp), rr=C.RR,
         htf_top=float(hi), htf_bottom=float(lo), htf_time=str(h1.t.iloc[i]), tap_time=str(h1.t.iloc[i]), confirm_time=str(now),
@@ -196,9 +196,9 @@ def plan_variant(sig):
     e, sl = sig["entry"], sig["swing_sl"]; d = sig["direction"]
     risk = (e - sl) if d == "long" else (sl - e)
     if risk <= 0 or risk/e*100 < (C.MIN_STOP_PCT_CRYPTO if sig["market"] == "crypto" else C.MIN_STOP_PCT_FOREX): return None
-    p = dict(sig); p.update(strategy="FVG-PLAN", tags=["FVG-PLAN"], experimental=1, sl=float(sl),
+    p = dict(sig); p.update(strategy="FVG-PLAN", tags=["FVG-PLAN"], experimental=0, sl=float(sl),
         tp=float(e + C.RR*risk if d == "long" else e - C.RR*risk),
-        reasons=sig["reasons"] + [f"PLAN: stop at swing {'low' if d=='long' else 'high'} of the leg, 15m FVG {sig['tap_to_confirm_bars']} bars after tap. EXPERIMENTAL (backtest crypto −0.08R IS / +0.00R OOS net)"])
+        reasons=sig["reasons"] + [f"PLAN: stop at swing {'low' if d=='long' else 'high'} of the leg, 15m FVG {sig['tap_to_confirm_bars']} bars after tap. NORMAL strategy (backtest crypto −0.08R IS / +0.00R OOS net)"])
     return p
 
 

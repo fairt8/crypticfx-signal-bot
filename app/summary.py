@@ -5,7 +5,9 @@ from . import db, telegram, scanner
 from .telegram import fmt_price
 NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "⭐ CHK checklist [PRIMARY]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "FOREX MF-REJ [experimental – collecting live results]", "DON20": "⭐ DON20 [PRIMARY]",
          "PAT-WEDGE": "PAT-WEDGE [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE [EXPERIMENTAL – paper]", "PAT-CUP": "PAT-CUP [EXPERIMENTAL – paper]", "BRK": "BRK [EXPERIMENTAL – paper]"}
-def label(r): return " + ".join(NAMES.get(t, t) for t in r["tags"])
+def label(r):
+    from . import strategies as SG
+    k = SG.eff(r.get("strategy"), r.get("tags")); return f"{k} {SG.label(k)}"
 def build(hours=2):
     from .telegram import esc, code, wat
     now = datetime.now(timezone.utc); since = (now - timedelta(hours=hours)).isoformat()
@@ -25,7 +27,8 @@ def build(hours=2):
                 where = "inside the 4H FVG" if w["dist_pct"] == 0 else f"{w['dist_pct']}% from the 4H FVG"
                 nxt = "waiting for a 15m FVG in the same direction" if w["dist_pct"] == 0 or w["tapped"] else "needs price to reach the zone first"
                 L.append(f"• <b>{esc(w['symbol'])}</b> {esc(w['direction'])} – price {code(w['price'])}, {where} ({code(w['bottom'])}–{code(w['top'])}); {nxt}")
-    op = [r for r in rs if r["status"] in ("open", "pending")]
+    from . import strategies as SG
+    op = [r for r in rs if r["status"] in ("open", "pending") and SG.active(SG.eff(r["strategy"], r["tags"]))]
     L += ["", f"📂 <b>Open/pending ({len(op)})</b>"]
     for r in op[:15]:
         d = "🟢" if r["direction"] == "long" else "🔴"
@@ -33,11 +36,14 @@ def build(hours=2):
     if len(op) > 15: L.append(f"… and {len(op)-15} more (see /signals)")
     bs = db.by_strategy()
     L += ["", "📈 <b>Live stats</b> <i>(60d, net after costs)</i>"]
-    for k, v in bs.items():   # CHK and DON20 (PRIMARY) come first
+    ret = [k for k, v in bs.items() if v.get("status") == "retired"]
+    for k, v in bs.items():   # PRIMARY, NORMAL, EXPERIMENTAL
+        if v.get("status") == "retired": continue
         wr = v['win_rate'] if v['win_rate'] is not None else '—'
         dot = "🟢" if v['net_r'] > 0 else ("🔴" if v['net_r'] < 0 else "⚪")
         extra = f" · {v.get('open',0)} open" if k == "DON20" else ""
-        L.append(f"{dot} {esc(NAMES.get(k, k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
+        L.append(f"{dot} {esc(v.get('label', k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
+    if ret: L.append(f"🗄 <i>Retired (no new signals): {esc(', '.join(ret))} – see /retired</i>")
     return "\n".join(L)
 def due(every_h):
     last = db.kv_get("last_summary_at")
