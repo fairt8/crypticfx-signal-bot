@@ -91,9 +91,12 @@ def check_stops(cache, post=True):
         except Exception as e: STATE["errors"].append(f"stops {p['symbol']}: {e}")
     _send(msgs, post)
     return len(msgs)
-def _send(msgs, post):
+def _send(msgs, post, entries=()):
     if not post: return
-    from . import telegram
+    from . import telegram, alerts
+    if not alerts.should_push("DON20"):   # alert mode excludes DON20: positions still tracked, nothing pushed
+        if entries: alerts.mute([dict(symbol=n["symbol"], strategy="DON20") for n in entries])
+        return
     for t in msgs:
         try: telegram.send(t)
         except Exception as e: STATE["errors"].append(f"telegram: {e}")
@@ -157,7 +160,7 @@ def daily_run(universe, post=True, now=None):
         for p, old, new in trail:
             lines.append(f"• {p['symbol']} {p['direction'].upper()} entry {fmtp(p['entry'])} → stop {fmtp(new)}" + ("" if new != old else " (unchanged)"))
         msgs.append("\n".join(lines))
-    _send(msgs, post)
+    _send(msgs, post, new_pos)
     res = dict(day=now.strftime("%Y-%m-%d"), fetched=len(data), universe=len(universe), new=len(new_pos),
                new_long=sum(n["direction"] == "long" for n in new_pos), new_short=sum(n["direction"] == "short" for n in new_pos),
                trailed=len(trail), closed=len(closed_today), secs=round(time.time()-t0))

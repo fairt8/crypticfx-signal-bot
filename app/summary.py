@@ -43,6 +43,15 @@ def build(hours=2):
         dot = "🟢" if v['net_r'] > 0 else ("🔴" if v['net_r'] < 0 else "⚪")
         extra = f" · {v.get('open',0)} open" if k == "DON20" else ""
         L.append(f"{dot} {esc(v.get('label', k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
+    try:
+        from . import alerts
+        mode = alerts.get_mode()
+        if mode != "all":
+            mu = alerts.muted_since(hours); by = {}
+            for m in mu: by[m["strategy"]] = by.get(m["strategy"], 0) + 1
+            L += ["", f"🔕 <b>Alert mode:</b> {esc(alerts.MODE_LABEL[mode])} · {len(mu)} signal(s) muted in {hours}h"
+                  + (f" ({esc(', '.join(f'{k} {v}' for k, v in sorted(by.items())))})" if by else "") + " – still tracked, see /new"]
+    except Exception: pass
     if ret: L.append(f"🗄 <i>Retired (no new signals): {esc(', '.join(ret))} – see /retired</i>")
     return "\n".join(L)
 def due(every_h):

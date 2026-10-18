@@ -16,8 +16,24 @@ def _start():
 def _stop(): db.release_lease()
 @app.get("/", response_class=HTMLResponse)
 def home(): return (Path(__file__).parent / "dashboard.html").read_text()
+def tier_rows(days, tier):
+    """Signals of one tier (primary|normal|experimental|profitable), with DON20 positions included when the tier covers DON20."""
+    from . import alerts, strategies as SG, trades
+    rs = [dict(r, strategy_key=SG.eff(r.get("strategy"), r.get("tags"))) for r in db.recent(days)]
+    rs = [r for r in rs if SG.active(r["strategy_key"]) and alerts.in_tier(r["strategy_key"], tier)]
+    if alerts.in_tier("DON20", tier):
+        since = trades._since(days)
+        rs += [dict(r, confidence=None, kind="don20") for r in trades._don_rows() if r["status"] == "open" or trades._in(r["created_at"], since)]
+    rs.sort(key=lambda r: str(trades._ts(r.get("created_at")) or ""), reverse=True); return rs
 @app.get("/api/signals")
-def signals(days: int = 30): return db.recent(days)
+def signals(days: int = 30, tier: str = ""):
+    if not tier: return db.recent(days)   # unchanged default
+    from . import alerts
+    if tier not in alerts.TIERS: return JSONResponse({"error": "tier must be primary|normal|experimental|profitable"}, 400)
+    return tier_rows(days, tier)
+@app.get("/api/alerts")
+def alerts_state():   # read-only (mode can only be changed from Telegram: /alerts or the mini app)
+    from . import alerts; return alerts.state()
 @app.get("/api/stats")
 def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode=telegram.MODE["state"], telegram_menu_button=telegram.MENU["state"], telegram_webhook=telegram.webhook_info(), leader=scanner.STATE.get("leader"), db="postgres" if db.PG else "sqlite", last_summary=scanner.STATE.get("last_summary"), last_scan=scanner.STATE.get("last_scan"), counts=scanner.STATE.get("last_counts"),
     sessions=scanner.STATE.get("sessions"), active_ccy=scanner.STATE.get("active_ccy"),

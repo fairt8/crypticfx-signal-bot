@@ -79,12 +79,33 @@ def app_token(request: Request, symbol: str):
 def app_strategies(request: Request):
     auth(request)
     from . import strategies
-    return dict(listing=strategies.listing(), by_strategy=db.by_strategy())
+    from . import alerts
+    return dict(listing=strategies.listing(), by_strategy=db.by_strategy(), alerts=alerts.state())
+
+@router.get("/app/api/alerts")
+def app_alerts(request: Request):
+    auth(request)
+    from . import alerts; return alerts.state()
+
+from pydantic import BaseModel
+class ModeIn(BaseModel): mode: str
+@router.post("/app/api/alerts")
+def app_alerts_set(request: Request, body: ModeIn):
+    auth(request)
+    from . import alerts
+    try: alerts.set_mode(body.mode)
+    except ValueError as e: raise HTTPException(400, str(e))
+    return alerts.state()
 
 @router.get("/app/api/signals")
-def app_signals(request: Request, days: int = 3):
+def app_signals(request: Request, days: int = 3, tier: str = ""):
     auth(request)
-    from . import strategies as SG
+    from . import strategies as SG, alerts
+    if tier:
+        if tier not in alerts.TIERS: raise HTTPException(400, "bad tier")
+        from .web import tier_rows
+        keep = ("id", "symbol", "market", "direction", "status", "entry", "sl", "tp", "confidence", "setup_score", "created_at", "result_r", "net_r", "kind")
+        return [dict({x: r.get(x) for x in keep}, strategy_key=r["strategy_key"], label=SG.label(r["strategy_key"]), active=True) for r in tier_rows(max(1, min(days, 30)), tier)[:80]]
     keep = ("id", "symbol", "market", "strategy", "direction", "status", "entry", "sl", "tp", "confidence", "setup_score", "created_at", "result_r")
     out = []
     for r in db.recent(max(1, min(days, 30)))[:60]:

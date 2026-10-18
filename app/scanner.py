@@ -142,6 +142,9 @@ def scan(crypto=True, fx=True, post=True, gen=None):
         try:
             from . import don20; don20.check_stops(cache, post=post)
         except Exception as e: STATE["errors"].append(f"don20 stops: {e}")
+    try:
+        from . import alerts; alerts.refresh()   # profitable-strategy set, recomputed every scan (shared via DB)
+    except Exception as e: STATE["errors"].append(f"alerts: {e}")
     STATE["last_scan"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["errors"] = STATE["errors"][-20:]
     STATE["last_counts"] = dict(scanned_crypto=len([k for k in cache if k.endswith("USDT")]),
         scanned_forex=len([k for k in cache if not k.endswith("USDT")]), candidates=len(found), new=len(new))

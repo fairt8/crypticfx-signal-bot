@@ -82,6 +82,8 @@ def send(text, chat_id=None, html=False):
     return r.ok
 def post_group(rows):
     rows = [r for r in rows if r["confidence"] >= C.MIN_CONFIDENCE_TO_POST]
+    from . import alerts
+    rows, _muted = alerts.filter_push(rows)   # alert mode: muted rows stay saved + tracked, just not pushed
     if not rows: return
     from . import strategies as SG
     rows.sort(key=lambda r: ("FVG-D1", "FVG", "FVG-PLAN").index(r["strategy"]) if r["strategy"] in ("FVG-D1", "FVG", "FVG-PLAN") else 9)
@@ -92,6 +94,8 @@ def post_group(rows):
     if send(text, html=True):
         for r in rows: db.update(r["id"], posted=1)
 def post_signal(s):
+    from . import alerts
+    if not alerts.filter_push([s])[0]: return
     if s["confidence"] >= C.MIN_CONFIDENCE_TO_POST and send(fmt(s), html=True): db.update(s["id"], posted=1)
 # ---------- trade lists + PnL commands (app/trades.py) ----------
 def _wat(x):
@@ -172,10 +176,61 @@ def cmd_don20():
         f"📈 Open: {d['open']}  ·  {_sg(d['open_live_net_r'], 'R')} net live  ·  🟩 {d['open_in_profit']} in profit",
         f"💰 <b>Total</b> {_sg(d['total_net_r'], 'R')} net (closed + open live)"])
 def cmd_strategies():
-    from . import strategies as SG
+    from . import strategies as SG, alerts
+    t = alerts.table()
     L = ["🧭 <b>Strategies</b>", "━━━━━━━━━━━━"]
-    for r in SG.listing(): L.append(f"{r['label']} · {esc(r['name'])}")
+    for r in SG.listing():
+        v = t.get(r["key"]) or {}
+        L.append(f"{r['label']} · {esc(r['name'])}" + ("  💰" if v.get("profitable") else "") + (f"\n    <i>{esc(v.get('verdict'))}</i>" if v and r["status"] != "retired" else ""))
+    L += ["", f"💰 <i>{esc(alerts.state()['definition'])}</i>", f"🔔 Alert mode: <b>{esc(alerts.MODE_LABEL[alerts.get_mode()])}</b> (/alerts)"]
     return "\n".join(L)
+SIG_TIERS = {"primary": "⭐ PRIMARY", "normal": "✅ NORMAL", "experimental": "🧪 EXPERIMENTAL", "profitable": "💰 Profitable strategies"}
+def cmd_signals(arg):
+    """/signals [primary|normal|experimental|profitable]: open/pending signals of that tier (plain = as before)."""
+    from . import strategies as SG, alerts
+    tier = (arg or "").split()[0].lower() if arg else ""
+    if tier and tier not in SIG_TIERS: return "Usage: /signals [primary|normal|experimental|profitable]"
+    rs = [r for r in db.recent(3) if r["status"] in ("pending","open") and SG.active(SG.eff(r["strategy"], r["tags"]))]
+    if not tier: return "\n\n".join(fmt(r) for r in rs[:10]) or "No open signals."
+    rs = [r for r in rs if alerts.in_tier(SG.eff(r["strategy"], r["tags"]), tier)]
+    L = [f"📡 <b>Signals · {SIG_TIERS[tier]}</b>"]
+    if tier == "profitable": L.append(f"<i>💰 now: {esc(', '.join(sorted(alerts.profitable_set())) or 'none')} · /strategies for the rule</i>")
+    L.append("━━━━━━━━━━━━")
+    out = "\n".join(L)
+    if alerts.in_tier("DON20", tier):   # DON20 lives in its own table: show its open positions with live PnL
+        from . import trades as T
+        dn = sorted(T.live(T._don_rows(" WHERE status='open'")), key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        tot = sum(r.get("live_net_r") or 0 for r in dn)
+        out += f"\n\n⭐ <b>DON20 open positions</b> ({len(dn)}) · live {_sg(tot, 'R')} net\n" + ("\n".join(_live_line(r) for r in dn[:15]) or "No open DON20 positions.")
+        if len(dn) > 15: out += f"\n…and {len(dn)-15} more (/open)"
+    if rs: out += "\n\n" + "\n\n".join(fmt(r) for r in rs[:10])
+    elif not alerts.in_tier("DON20", tier): out += "\n\nNo open/pending signals in this tier."
+    return out
+def _alerts_markup(cur):
+    from . import alerts
+    btn = lambda m: {"text": ("✅ " if m == cur else "") + alerts.MODE_LABEL[m], "callback_data": "alerts:" + m}
+    return {"inline_keyboard": [[btn("all")], [btn("primary")], [btn("profitable")], [btn("primary_or_profitable")]]}
+def _alerts_text():
+    from . import alerts
+    s = alerts.state()
+    return (f"🔔 <b>Alert mode:</b> {esc(s['mode_label'])}\n\n💰 Profitable now: <b>{esc(', '.join(s['profitable']) or 'none')}</b>\n"
+            f"<i>{esc(s['definition'])}</i>\n\nMuted signals are still saved and tracked (dashboard, /open, /closed); they are just not pushed here. Tap to switch:")
+def send_alerts_panel(chat_id=None):
+    from . import alerts
+    body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text=_alerts_text(), reply_markup=_alerts_markup(alerts.get_mode()))
+    return requests.post(API("sendMessage"), json=body, timeout=20).ok
+def on_callback(q):
+    from . import alerts
+    chat = ((q.get("message") or {}).get("chat") or {}).get("id")
+    if not allowed_chat(chat) or str((q.get("from") or {}).get("id")) != str(C.TELEGRAM_CHAT_ID).strip():
+        requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"]), timeout=10); return
+    data = q.get("data") or ""
+    if data.startswith("alerts:"):
+        m = alerts.set_mode(data.split(":", 1)[1])
+        requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"], text="Alert mode: " + alerts.MODE_LABEL[m]), timeout=10)
+        requests.post(API("editMessageText"), json=dict(chat_id=chat, message_id=q["message"]["message_id"], parse_mode="HTML",
+                      text=_alerts_text(), reply_markup=_alerts_markup(m)), timeout=10)
+    else: requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"]), timeout=10)
 HTML_CMDS = ("/signals", "/open", "/closed", "/pending", "/new", "/retired", "/don20", "/strategies", "/pnl", "/trades", "/help", "/start")
 HELP_HTML = ("🤖 <b>CrypticFx signal bot</b>\n\n"
     "📈 /open – currently trading, live PnL (% and R)\n"
@@ -187,8 +242,10 @@ HELP_HTML = ("🤖 <b>CrypticFx signal bot</b>\n\n"
     "🗄 /retired [day|week|month|all] – history of retired strategies\n"
     "⭐ /don20 – DON20 total PnL (closed + open live)\n"
     "🧭 /strategies – active strategies and labels\n"
-    "📱 /app – open the CrypticFx mini app (also the ☰ menu button)\n\n"
-    "/signals – open/pending signal cards\n/history [days] – last results\n/stats – 30-day stats\n/explain &lt;id&gt; – AI explanation\n/ask &lt;question&gt; – ask AI")
+    "📱 /app – open the CrypticFx mini app (also the ☰ menu button)\n"
+    "📡 /signals [primary|profitable|normal|experimental] – open/pending signals, optionally one tier\n"
+    "🔔 /alerts [all|primary|profitable|both] – which signals get pushed here (buttons to switch)\n\n"
+    "/history [days] – last results\n/stats – 30-day stats\n/explain &lt;id&gt; – AI explanation\n/ask &lt;question&gt; – ask AI")
 HELP = "/signals – open/pending signals\n/history [days] – last results (default 7)\n/stats – 30-day stats\n/explain <id> – AI explanation\n/ask <question> – ask AI about recent signals"
 def handle(text, chat):
     parts = text.split(maxsplit=1); cmd = parts[0].split("@")[0].lower(); arg = parts[1] if len(parts) > 1 else ""
@@ -197,10 +254,7 @@ def handle(text, chat):
     if cmd == "/don20": return cmd_don20()
     if cmd == "/strategies": return cmd_strategies()
     if cmd in ("/pnl", "/trades"): return cmd_symbol(arg, cmd == "/trades")
-    if cmd == "/signals":
-        from . import strategies as SG
-        rs = [r for r in db.recent(3) if r["status"] in ("pending","open") and SG.active(SG.eff(r["strategy"], r["tags"]))][:10]
-        return "\n\n".join(fmt(r) for r in rs) or "No open signals."
+    if cmd == "/signals": return cmd_signals(arg)
     if cmd == "/history":
         d = int(arg) if arg.isdigit() else 7
         rs = db.recent(d)[:30]
@@ -231,6 +285,7 @@ def allowed_chat(chat):
     """Only the owner chat (TELEGRAM_CHAT_ID) gets answers."""
     return bool(C.TELEGRAM_CHAT_ID) and str(chat) == str(C.TELEGRAM_CHAT_ID).strip()
 def process_update(u):
+    if u.get("callback_query"): return on_callback(u["callback_query"])
     m = u.get("message") or {}
     if m.get("text","").startswith("/"):
         chat = (m.get("chat") or {}).get("id")
@@ -238,6 +293,13 @@ def process_update(u):
         try:
             cmd = m["text"].split()[0].split("@")[0].lower()
             if cmd == "/app": send_app_button(chat); return
+            if cmd == "/alerts":
+                a = m["text"].split(maxsplit=1)
+                if len(a) > 1:
+                    from . import alerts
+                    try: alerts.set_mode(a[1])
+                    except ValueError as e: return send(str(e), chat)
+                return send_alerts_panel(chat)
             out = handle(m["text"], chat)
             html = cmd in HTML_CMDS
             send_long(out if html else out, chat, html=html)
@@ -282,7 +344,7 @@ def start():
     if C.PUBLIC_URL: threading.Thread(target=set_menu_button, daemon=True).start()
     if C.PUBLIC_URL and C.TELEGRAM_MODE != "polling":
         r = requests.post(API("setWebhook"), json=dict(url=C.PUBLIC_URL.rstrip("/") + "/telegram/webhook", secret_token=webhook_secret(),
-            allowed_updates=["message"], drop_pending_updates=False), timeout=20).json()
+            allowed_updates=["message", "callback_query"], drop_pending_updates=False), timeout=20).json()
         MODE["state"] = "webhook " + ("ok" if r.get("ok") else f"failed: {r.get('description')}")
         return
     info = requests.get(API("getWebhookInfo"), timeout=20).json().get("result", {})
