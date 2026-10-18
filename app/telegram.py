@@ -186,7 +186,8 @@ HELP_HTML = ("🤖 <b>CrypticFx signal bot</b>\n\n"
     "📜 /trades SYMBOL – full trade history of one token\n"
     "🗄 /retired [day|week|month|all] – history of retired strategies\n"
     "⭐ /don20 – DON20 total PnL (closed + open live)\n"
-    "🧭 /strategies – active strategies and labels\n\n"
+    "🧭 /strategies – active strategies and labels\n"
+    "📱 /app – open the CrypticFx mini app (also the ☰ menu button)\n\n"
     "/signals – open/pending signal cards\n/history [days] – last results\n/stats – 30-day stats\n/explain &lt;id&gt; – AI explanation\n/ask &lt;question&gt; – ask AI")
 HELP = "/signals – open/pending signals\n/history [days] – last results (default 7)\n/stats – 30-day stats\n/explain <id> – AI explanation\n/ask <question> – ask AI about recent signals"
 def handle(text, chat):
@@ -235,10 +236,31 @@ def process_update(u):
         chat = (m.get("chat") or {}).get("id")
         if not allowed_chat(chat): return
         try:
-            cmd = m["text"].split()[0].split("@")[0].lower(); out = handle(m["text"], chat)
+            cmd = m["text"].split()[0].split("@")[0].lower()
+            if cmd == "/app": send_app_button(chat); return
+            out = handle(m["text"], chat)
             html = cmd in HTML_CMDS
             send_long(out if html else out, chat, html=html)
         except Exception as e: send(f"Error: {type(e).__name__}: {e}"[:500], chat)
+def send_app_button(chat_id=None):
+    """Reply with an inline web_app button that opens the Mini App (private chat only)."""
+    from .webapp import app_url
+    url = app_url()
+    if not url: return send("Mini app needs a public URL (PUBLIC_URL / RENDER_EXTERNAL_URL).", chat_id)
+    body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text="📱 <b>CrypticFx mini app</b>\nStats, live PnL, trades, token lookup, strategies and signals in one place.",
+                reply_markup={"inline_keyboard": [[{"text": "🚀 Open CrypticFx app", "web_app": {"url": url}}]]})
+    return requests.post(API("sendMessage"), json=body, timeout=20).ok
+MENU = {"state": "not set"}
+def set_menu_button():
+    """Owner chat's ☰ menu button -> Mini App (setChatMenuButton, type web_app). Token from env, never logged."""
+    from .webapp import app_url
+    url = app_url()
+    if not (enabled() and url and C.TELEGRAM_CHAT_ID): MENU["state"] = "skipped (no public URL or chat)"; return
+    try:
+        r = requests.post(API("setChatMenuButton"), json=dict(chat_id=int(str(C.TELEGRAM_CHAT_ID).strip()),
+            menu_button={"type": "web_app", "text": "📱 App", "web_app": {"url": url}}), timeout=20).json()
+        MENU["state"] = "ok" if r.get("ok") else f"failed: {r.get('description')}"
+    except Exception as e: MENU["state"] = f"error: {type(e).__name__}"
 def poll_forever():
     off = 0
     while True:
@@ -257,6 +279,7 @@ def start():
     """Webhook when a public URL is known (Render sets RENDER_EXTERNAL_URL) -> no polling conflicts between instances.
     Otherwise long-polling, but never delete a webhook someone else set unless TELEGRAM_MODE=polling."""
     if not enabled(): return
+    if C.PUBLIC_URL: threading.Thread(target=set_menu_button, daemon=True).start()
     if C.PUBLIC_URL and C.TELEGRAM_MODE != "polling":
         r = requests.post(API("setWebhook"), json=dict(url=C.PUBLIC_URL.rstrip("/") + "/telegram/webhook", secret_token=webhook_secret(),
             allowed_updates=["message"], drop_pending_updates=False), timeout=20).json()

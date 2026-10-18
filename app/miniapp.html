@@ -1,0 +1,84 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>CrypticFx</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#0f1420);--bg2:var(--tg-theme-secondary-bg-color,#171e2e);--tx:var(--tg-theme-text-color,#e8ecf4);--hint:var(--tg-theme-hint-color,#8a94a8);--ln:var(--tg-theme-link-color,#5aa9ff);--btn:var(--tg-theme-button-color,#3b82f6);--btx:var(--tg-theme-button-text-color,#fff);--g:#22c55e;--r:#ef4444;--y:#f59e0b;--p:#a855f7}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding-bottom:74px}
+header{padding:16px 16px 6px}h1{font-size:20px;margin:0}h2{font-size:16px;margin:18px 0 10px}.muted{color:var(--hint);font-size:12.5px}
+main{padding:0 12px}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.card{background:var(--bg2);border-radius:14px;padding:12px 14px}
+.card b{display:block;font-size:20px;margin-top:2px}.card.wide{grid-column:span 2}.pos{color:var(--g)}.neg{color:var(--r)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px;scrollbar-width:none}.chip{flex:none;border:0;border-radius:999px;padding:7px 13px;background:var(--bg2);color:var(--tx);font-size:13.5px}
+.chip.on{background:var(--btn);color:var(--btx)}.row{background:var(--bg2);border-radius:14px;padding:11px 13px;margin:8px 0;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.row .l{min-width:0}.row .sym{font-weight:700}.row .sub{color:var(--hint);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row .r{text-align:right;font-weight:700;white-space:nowrap}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;background:rgba(127,127,127,.18);margin-left:4px;font-weight:600}
+.long{color:var(--g)}.short{color:var(--r)}nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--bg2);border-top:1px solid rgba(127,127,127,.15);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+nav button{flex:1;border:0;background:none;color:var(--hint);font-size:11px;padding:4px 0}nav button span{display:block;font-size:20px}nav button.on{color:var(--btn)}
+input{width:100%;padding:11px 13px;border-radius:12px;border:0;background:var(--bg2);color:var(--tx);font-size:16px}.btn{border:0;border-radius:12px;padding:11px 16px;background:var(--btn);color:var(--btx);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;text-align:right;border-bottom:1px solid rgba(127,127,127,.12)}td:first-child,th:first-child{text-align:left}th{color:var(--hint);font-weight:500}
+.ptr{text-align:center;color:var(--hint);font-size:12px;height:0;overflow:hidden;transition:height .2s}.err{background:rgba(239,68,68,.12);color:var(--r);padding:14px;border-radius:14px;margin:12px 0}
+.sec{display:none}.sec.on{display:block}.sum{display:flex;gap:14px;flex-wrap:wrap;margin:4px 0 6px;font-size:13.5px}
+</style></head><body>
+<div class="ptr" id="ptr">↓ release to refresh</div>
+<header><h1>📊 CrypticFx</h1><div class="muted" id="hdr">loading…</div></header>
+<main>
+<section class="sec on" id="s-home"></section>
+<section class="sec" id="s-trades"><div class="chips" id="states"></div><div class="chips" id="periods"></div><div id="tsum" class="sum"></div><div id="tlist"></div></section>
+<section class="sec" id="s-token"><h2>🔎 Token lookup</h2><div style="display:flex;gap:8px"><input id="q" placeholder="e.g. BTC, SOLUSDT, EURUSD" autocapitalize="characters"><button class="btn" id="go">Go</button></div><div id="tok"></div></section>
+<section class="sec" id="s-strat"></section>
+<section class="sec" id="s-sig"></section>
+</main>
+<nav id="nav"></nav>
+<script>
+const tg=window.Telegram&&Telegram.WebApp; if(tg){tg.ready();tg.expand();try{tg.setHeaderColor('secondary_bg_color')}catch(e){}}
+const ID=tg?tg.initData:''; const H=t=>{try{tg&&tg.HapticFeedback.selectionChanged()}catch(e){}};
+const $=i=>document.getElementById(i), esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sg=(v,suf='R',d=2)=>v==null?'–':`<span class="${v>0?'pos':v<0?'neg':''}">${v>0?'+':''}${(+v).toFixed(d)}${suf}</span>`;
+const wat=t=>{if(!t)return'';const d=new Date(String(t).replace(' ','T').replace(/\+00:00$/,'Z').replace(/(\d)$/,'$1Z'));return isNaN(d)?'':d.toLocaleString('en-GB',{timeZone:'Africa/Lagos',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' WAT'};
+async function api(p){const r=await fetch('/app/api/'+p,{headers:{'X-Telegram-Init-Data':ID}});if(!r.ok){let m=r.status;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}return r.json()}
+const ERR=e=>`<div class="err">⚠️ ${esc(e.message||e)}${ID?'':'<br><br>Open this page from <b>@CrypticFxBot</b> (menu button or /app) – it only works inside Telegram for the owner.'}</div>`;
+const TABS=[['home','🏠','Home'],['trades','📈','Trades'],['token','🔎','Token'],['strat','🧭','Strategies'],['sig','🆕','Signals']];
+let cur='home',st='open',per='all',loaded={};
+$('nav').innerHTML=TABS.map(([k,i,n])=>`<button data-k="${k}" class="${k==cur?'on':''}"><span>${i}</span>${n}</button>`).join('');
+$('nav').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.k)};
+function show(k,push=true){if(k!==cur)H();cur=k;document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id=='s-'+k));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.k==k));
+ if(tg){k=='home'&&!tokOpen?tg.BackButton.hide():tg.BackButton.show()} if(!loaded[k])load(k); window.scrollTo(0,0)}
+if(tg)tg.BackButton.onClick(()=>{if(tokOpen){tokOpen=false;$('tok').innerHTML='';$('q').value='';show(cur)}else show('home')});
+const STATES=[['open','📈 Open'],['pending','⏳ Pending'],['new','🆕 New'],['closed','🏁 Closed'],['retired','🗄 Retired']],PERS=[['day','Day'],['week','Week'],['month','Month'],['all','All']];
+function chips(){$('states').innerHTML=STATES.map(([k,n])=>`<button class="chip ${k==st?'on':''}" data-s="${k}">${n}</button>`).join('');$('periods').innerHTML=PERS.map(([k,n])=>`<button class="chip ${k==per?'on':''}" data-p="${k}">${n}</button>`).join('')}
+$('states').onclick=e=>{const b=e.target.closest('button');if(b){st=b.dataset.s;H();chips();load('trades')}};$('periods').onclick=e=>{const b=e.target.closest('button');if(b){per=b.dataset.p;H();chips();load('trades')}};chips();
+const dir=d=>`<span class="${d}">${d=='long'?'▲ LONG':'▼ SHORT'}</span>`;
+function trow(r){const open=r.status=='open',cl=r.net_r!=null;const right=open?`${sg(r.live_net_r)}<div class="sub">${sg(r.live_pct,'%')}</div>`:cl?`${sg(r.net_r)}<div class="sub">${sg(r.net_pct,'%')}</div>`:`<span class="muted">${esc(r.status)}</span>`;
+ const lab=(r.strategy_label||'').split(' ')[0];return `<div class="row" data-sym="${esc(r.symbol)}"><div class="l"><div class="sym">${esc(r.symbol)} ${dir(r.direction)} <span class="tag">${lab} ${esc(r.strategy_key||r.strategy)}</span></div>
+ <div class="sub">entry ${r.entry} · SL ${r.sl}${r.tp?' · TP '+r.tp:''}${open&&r.price_now?' · now '+r.price_now:''}</div><div class="sub">${wat(r.closed_at||r.filled_at||r.created_at)}${r.id?' · #'+r.id:''}</div></div><div class="r">${right}</div></div>`}
+document.addEventListener('click',e=>{const r=e.target.closest('.row[data-sym]');if(r&&cur!='token'){H();$('q').value=r.dataset.sym;show('token');lookup()}else if(r&&cur=='token'&&!tokOpen){}});
+async function load(k){loaded[k]=1;const el={home:$('s-home'),trades:$('tlist'),strat:$('s-strat'),sig:$('s-sig')}[k];if(!el)return;if(!el.innerHTML)el.innerHTML='<p class="muted">loading…</p>';
+ try{if(k=='home')await home(el);else if(k=='trades')await trades(el);else if(k=='strat')await strat(el);else if(k=='sig')await sigs(el);$('hdr').textContent='updated '+new Date().toLocaleTimeString('en-GB',{timeZone:'Africa/Lagos',hour:'2-digit',minute:'2-digit'})+' WAT · pull down to refresh'}
+ catch(e){el.innerHTML=ERR(e);$('hdr').textContent='not authorised'}}
+async function home(el){const [o,b]=await Promise.all([api('overview'),api('backtest').catch(()=>({available:false}))]);const s=o.stats,d=o.don20;
+ let h=`<div class="cards"><div class="card wide">⭐ DON20 total PnL <span class="muted">(PRIMARY)</span><b>${sg(d.total_net_r)}</b><div class="muted">closed ${sg(d.closed_net_r)} · open live ${sg(d.open_live_net_r)} · ${d.open} open, ${d.open_in_profit} in profit</div></div>
+ <div class="card">📈 Open signals live<b>${sg(o.open_live_net_r)}</b><div class="muted">${o.open_count} open · ${o.open_in_profit} in profit</div></div>
+ <div class="card">🏁 Net R 30d<b>${sg(s.net_r)}</b><div class="muted">⭐+✅ only</div></div>
+ <div class="card">🎯 Win rate 30d<b>${s.win_rate==null?'–':s.win_rate+'%'}</b><div class="muted">${s.tp} W / ${s.sl} L</div></div>
+ <div class="card">🧾 Signals 30d<b>${s.total}</b><div class="muted">${s.open} open · ${s.pending} pending</div></div></div>`;
+ if(o.last_scan)h+=`<p class="muted">🔄 last scan ${wat(o.last_scan)}${o.sessions&&o.sessions.length?' · sessions: '+esc(o.sessions.join(', ')):''}</p>`;
+ if(b.available&&b.report){const r=b.report;h+=`<h2>🧪 Backtest – all strategies</h2><p class="muted">${wat(r.generated)} · last ${r.window_days} days · BTC season: ${esc(r.btc_season_now)}</p><div class="card"><table><tr><th>Strategy</th><th>n</th><th>Win%</th><th>Net R</th><th>R/tr</th></tr>`+
+  Object.entries(r.strategies).map(([k,v])=>`<tr><td>${(v.label||'').split(' ')[0]} ${esc(k)}</td><td>${v.total.n}</td><td>${v.total.win??'–'}</td><td>${sg(v.total.net_r,'',1)}</td><td>${sg(v.total.r_per_trade,'',3)}</td></tr>`).join('')+'</table></div>'}
+ el.innerHTML=h}
+async function trades(el){const d=await api(`trades?state=${st}&period=${per}`);const sum=[`<b>${d.count}</b> ${st}`];if(st=='open')sum.push('live '+sg(d.open_live_net_r));if(st=='closed'||st=='retired')sum.push('net '+sg(d.closed_net_r),'win '+(d.closed_win??'–')+'%');
+ $('tsum').innerHTML=sum.join(' · ');el.innerHTML=d.rows.length?d.rows.map(trow).join('')+(d.count>d.rows.length?`<p class="muted">…and ${d.count-d.rows.length} more</p>`:''):'<p class="muted">Nothing here for this period.</p>'}
+let tokOpen=false;async function lookup(){const q=$('q').value.trim();if(!q)return;tokOpen=true;if(tg)tg.BackButton.show();$('tok').innerHTML='<p class="muted">loading…</p>';
+ try{const d=await api('token/'+encodeURIComponent(q));const s=d.summary;$('tok').innerHTML=`<h2>${esc(s.symbol)}</h2><div class="cards"><div class="card">Closed net<b>${sg(s.net_r)}</b><div class="muted">${sg(s.net_pct,'%')} · ${s.closed} closed · win ${s.win_rate??'–'}%</div></div><div class="card">Open live<b>${sg(s.open_live_net_r)}</b><div class="muted">${s.open} open · ${s.pending} pending</div></div></div>`+(d.trades.length?d.trades.map(trow).join(''):'<p class="muted">No trades for this token yet.</p>');
+ try{tg&&tg.HapticFeedback.notificationOccurred('success')}catch(e){}}catch(e){$('tok').innerHTML=ERR(e)}}
+$('go').onclick=lookup;$('q').onkeydown=e=>{if(e.key=='Enter'){e.target.blur();lookup()}};
+async function strat(el){const d=await api('strategies');const bs=d.by_strategy;
+ el.innerHTML='<h2>🧭 Strategies</h2>'+d.listing.map(x=>`<div class="row"><div class="l"><div class="sym">${esc(x.key)} <span class="tag">${esc(x.label)}</span></div><div class="sub">${esc(x.name)}</div></div></div>`).join('')+
+ `<h2>📊 Per-strategy stats</h2><div class="card"><table><tr><th>Strategy</th><th>Closed</th><th>Win%</th><th>Net R</th><th>Open</th></tr>`+Object.entries(bs).map(([k,v])=>`<tr><td>${(v.label||'').split(' ')[0]} ${esc(k)}</td><td>${v.closed??0}</td><td>${v.win_rate??'–'}</td><td>${sg(v.net_r,'',1)}</td><td>${v.open??0}</td></tr>`).join('')+'</table></div><p class="muted">Headline stats on Home count ⭐ PRIMARY + ✅ NORMAL only.</p>'}
+async function sigs(el){const d=await api('signals?days=3');el.innerHTML='<h2>🆕 Latest signals <span class="muted">(3 days)</span></h2>'+(d.length?d.map(r=>`<div class="row" data-sym="${esc(r.symbol)}"><div class="l"><div class="sym">${esc(r.symbol)} ${dir(r.direction)} <span class="tag">${(r.label||'').split(' ')[0]} ${esc(r.strategy_key)}</span></div><div class="sub">entry ${r.entry} · SL ${r.sl} · TP ${r.tp}${r.setup_score?' · score '+r.setup_score:''}</div><div class="sub">${wat(r.created_at)} · #${r.id}</div></div><div class="r">${r.result_r!=null?sg(r.result_r):'<span class="muted">'+esc(r.status)+'</span>'}</div></div>`).join(''):'<p class="muted">No signals in the last 3 days.</p>')}
+function refresh(){loaded={};load(cur);if(cur=='token'&&tokOpen)lookup()}
+// pull-to-refresh + 60s auto-refresh of the visible tab
+let y0=null,pull=0;addEventListener('touchstart',e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
+addEventListener('touchmove',e=>{if(y0==null)return;pull=Math.max(0,e.touches[0].clientY-y0);$('ptr').style.height=Math.min(pull/2,40)+'px';$('ptr').textContent=pull>110?'↻ release to refresh':'↓ pull to refresh'},{passive:true});
+addEventListener('touchend',()=>{if(pull>110){try{tg&&tg.HapticFeedback.impactOccurred('light')}catch(e){}refresh()}pull=0;y0=null;$('ptr').style.height='0'});
+setInterval(()=>{if(!document.hidden&&cur!='token')refresh()},60000);
+if(tg&&tg.disableVerticalSwipes)try{tg.disableVerticalSwipes()}catch(e){}
+load('home');
+</script></body></html>

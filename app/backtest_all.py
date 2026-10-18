@@ -232,6 +232,9 @@ def main():
     L += ["", "Notes: replays the live functions; DON20 open positions marked to market; MF-REJ dynamic strong pair not replayed; "
           "per-scan caps (PAT/BRK 3, MF 4) not applied. " + __doc__.split("Seasons:")[1].strip()]
     open(mp, "w").write("\n".join(L) + "\n")
+    try:   # compact copy for the Telegram Mini App (works when run with the production DATABASE_URL, e.g. from GitHub Actions)
+        from . import db, webapp; db.init(); db.kv_set("backtest_all:last", json.dumps(webapp.compact_backtest(json.loads(json.dumps(res, default=str)))))
+    except Exception as e: print(f"[bt_all] could not save mini-app copy: {type(e).__name__}", flush=True)
     print("\n".join(L[:20 + len(SG.STATUS)]), flush=True); print(f"[bt_all] wrote {mp} and {jp} in {res['runtime_s']}s, peak RSS {res['max_rss_mb']} MB main / {res['max_rss_worker_mb']} MB per worker", flush=True)
     if not a.no_telegram:
         from . import telegram

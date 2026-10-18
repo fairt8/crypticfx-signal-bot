@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from pathlib import Path
 from . import config as C, db, scanner, telegram, ai, summary, don20
 app = FastAPI(title="FVG Signal Bot")
+from .webapp import router as _miniapp
+app.include_router(_miniapp)   # Telegram Mini App: /app + owner-only /app/api/*
 @app.on_event("startup")
 def _start():
     db.init(); don20.init(); telegram.start(); summary.start()
@@ -17,7 +19,7 @@ def home(): return (Path(__file__).parent / "dashboard.html").read_text()
 @app.get("/api/signals")
 def signals(days: int = 30): return db.recent(days)
 @app.get("/api/stats")
-def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode=telegram.MODE["state"], telegram_webhook=telegram.webhook_info(), leader=scanner.STATE.get("leader"), db="postgres" if db.PG else "sqlite", last_summary=scanner.STATE.get("last_summary"), last_scan=scanner.STATE.get("last_scan"), counts=scanner.STATE.get("last_counts"),
+def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode=telegram.MODE["state"], telegram_menu_button=telegram.MENU["state"], telegram_webhook=telegram.webhook_info(), leader=scanner.STATE.get("leader"), db="postgres" if db.PG else "sqlite", last_summary=scanner.STATE.get("last_summary"), last_scan=scanner.STATE.get("last_scan"), counts=scanner.STATE.get("last_counts"),
     sessions=scanner.STATE.get("sessions"), active_ccy=scanner.STATE.get("active_ccy"),
     forex_priority=[r for r in scanner.STATE.get("forex_rank", []) if r.get("priority")],
     strength={k: round(v,3) for k,v in scanner.STATE.get("strength", {}).items()},
