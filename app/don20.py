@@ -137,6 +137,8 @@ def daily_run(universe, post=True, now=None):
             e = px.get(s) or float(d.c.iloc[-1]); sd = 1 if side == "long" else -1; st = e - sd*K*a
             new_pos.append(dict(symbol=s, direction=side, signal_day=day, entry=e, stop=st, atr=a, close=float(d.c.iloc[-1])))
         except Exception as e: STATE["errors"].append(f"signal {s}: {e}")
+    new_pos, thin = binance.liquid(new_pos, key=lambda n: ("crypto", n["symbol"]))   # liquidity floor: no new DON20 entries in thin coins
+    if thin: STATE["skipped_low_volume"] = thin
     for n in new_pos:
         with db.conn() as c:
             cur = c.execute("""INSERT INTO don20(symbol,direction,signal_day,opened_at,entry,init_stop,stop,atr,best_close,last_checked)

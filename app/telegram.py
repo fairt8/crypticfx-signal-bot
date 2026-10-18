@@ -287,9 +287,9 @@ def token_shape():
     import re
     t = C.TELEGRAM_BOT_TOKEN
     if "res" not in _SHAPE or time.time() - _SHAPE.get("t", 0) > 300:
-        try: r = requests.get(API("getMe"), timeout=10).json(); res = dict(ok=r.get("ok"), description=r.get("description"))
+        try: r = requests.get(API("getMe"), timeout=10).json(); res = dict(ok=r.get("ok"), description=r.get("description"), username=(r.get("result") or {}).get("username"))
         except Exception as e: res = dict(ok=False, description=type(e).__name__)
         _SHAPE.update(res=res, t=time.time())
     return dict(length=len(t), bot_id_digits=len(t.split(":")[0]) if ":" in t else 0,
                 matches_regex=bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{30,}", t)),
-                getMe_ok=_SHAPE["res"]["ok"], getMe_description=_SHAPE["res"]["description"])
+                getMe_ok=_SHAPE["res"]["ok"], getMe_description=_SHAPE["res"]["description"], bot_username=_SHAPE["res"].get("username"))

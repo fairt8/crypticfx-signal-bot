@@ -6,6 +6,8 @@ from . import config as C, db, scanner, telegram, summary, don20
 
 def main():
     post = "--no-post" not in sys.argv
+    try: print(f"[run_once] telegram bot: @{telegram.token_shape().get('bot_username')}", flush=True)   # public bot username only, never the token
+    except Exception: pass
     db.init(); don20.init()
     if not db.lease("scheduler", ttl_s=C.SCAN_WATCHDOG_S + 300):
         print("[run_once] another instance holds the scheduler lease; skipping", flush=True); return 0

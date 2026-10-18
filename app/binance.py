@@ -7,6 +7,25 @@ STABLE = {"USDC","FDUSD","TUSD","BUSD","DAI","USDP","EUR","AEUR","PAX","USDS","E
 def get(path, **p):
     r = S.get(C.BINANCE_BASE + path, params=p, timeout=(5, 15)); r.raise_for_status(); return r.json()
 
+_V24 = {"t": 0, "v": {}}
+def vol24(ttl=600):
+    """24h quote volume (USDT) for every symbol from ONE /ticker/24hr call, cached 10 min."""
+    import time
+    if time.time() - _V24["t"] > ttl or not _V24["v"]:
+        try: _V24["v"] = {t["symbol"]: float(t["quoteVolume"]) for t in get("/api/v3/ticker/24hr")}; _V24["t"] = time.time()
+        except Exception: pass
+    return _V24["v"]
+def liquid(sigs, key=lambda s: (s.get("market"), s.get("symbol"))):
+    """Split new signals into (kept, skipped) by the crypto liquidity floor. Forex and unknown volumes are kept (fail-open)."""
+    if not C.MIN_CRYPTO_VOL_USD: return list(sigs), []
+    keep, skip = [], []; v = None
+    for s in sigs:
+        mk, sym = key(s)
+        if mk != "crypto": keep.append(s); continue
+        v = v if v is not None else vol24()
+        q = v.get(sym)
+        (skip if q is not None and q < C.MIN_CRYPTO_VOL_USD else keep).append(s)
+    return keep, [f"{key(s)[1]} {(s.get('strategy') or 'DON20') if isinstance(s, dict) else ''}".strip() for s in skip]
 def top_usdt_symbols(n=C.CRYPTO_TOP_N):
     """Top n USDT spot pairs by quote volume over the last 48h (rolling 2d window)."""
     info = get("/api/v3/exchangeInfo", permissions="SPOT")

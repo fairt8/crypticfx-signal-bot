@@ -118,7 +118,9 @@ def by_strategy(days=60):
     rank = {s: i for i, s in enumerate(SG.ORDER)}   # PRIMARY, NORMAL, EXPERIMENTAL, then RETIRED
     return dict(sorted(out.items(), key=lambda kv: (rank.get(kv[1].get("status"), 9), list(SG.STATUS).index(kv[0]) if kv[0] in SG.STATUS else 99)))
 def stats(days=30):
-    rs = recent(days, 10000); closed = [r for r in rs if r["status"] in CLOSED]
+    """Headline stats: ⭐ PRIMARY + ✅ NORMAL signal strategies only (🧪 experimental / 🗄 retired are in by_strategy)."""
+    from . import strategies as SG
+    rs = [r for r in recent(days, 10000) if SG.main_stats(SG.eff(r.get("strategy"), r.get("tags")))]; closed = [r for r in rs if r["status"] in CLOSED]
     w = sum((r["result_r"] or 0) > 0 for r in closed)
     return dict(total=len(rs), tp=w, sl=len(closed)-w, open=sum(r["status"]=="open" for r in rs),
         pending=sum(r["status"]=="pending" for r in rs), expired=sum(r["status"]=="expired" for r in rs),

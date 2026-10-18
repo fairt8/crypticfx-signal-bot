@@ -236,6 +236,7 @@ def main():
     if not a.no_telegram:
         from . import telegram
         if telegram.enabled():
+            print(f"[bt_all] telegram bot: @{telegram.token_shape().get('bot_username')}", flush=True)   # username only
             T2 = [f"🧪 <b>Monthly backtest – all strategies</b>", f"<i>last {a.days} days · {len(syms)} coins · {len(fx)} FX pairs · BTC season: {res['btc_season_now']}</i>", "━━━━━━━━━━━━"]
             for k, v in res["strategies"].items():
                 t = v["total"]

@@ -1,7 +1,8 @@
 """Single source of truth for strategy status + labels (Telegram, dashboard, stats, summaries).
 primary / normal / experimental = active (new signals); retired = no new signals, history kept, code kept (backtest_all)."""
 STATUS = {
-    "CHK": "primary", "DON20": "primary",
+    "DON20": "primary",
+    "CHK": "experimental",   # user 2026-10-18: PRIMARY -> EXPERIMENTAL (paper test; posts again)
     "FVG-D1": "normal", "FVG-PLAN": "normal",
     "MF-REJ": "experimental", "BRK": "experimental", "PAT-TRIPLE": "experimental",
     "FVG": "retired", "FVG+TREND": "retired", "PAT-WEDGE": "retired", "PAT-CUP": "retired",
@@ -23,4 +24,5 @@ def label(k): return LABEL[status(k)]
 def active(k): return status(k) != "retired"
 def name(k): return NAME.get(k, k)
 def full(k): return f"{label(k)} · {name(k)}"
+def main_stats(k): return status(k) in ("primary", "normal")   # dashboard/summary headline stats: PRIMARY + NORMAL only
 def listing(): return [dict(key=k, status=status(k), label=label(k), name=name(k)) for s in ORDER for k in STATUS if STATUS[k] == s]

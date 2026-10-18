@@ -34,7 +34,7 @@ def patterns_for(data, market, found, budget_end):
 
 def qualifies(sig):
     """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
-    if sig.get("strategy") == "MF-REJ" or sig.get("strategy") in PAT_STRATS: return True   # own rules; MIN_POST_SCORE does not apply   # own forex strategy with its own filters (session, bias, range, 2/day)
+    if sig.get("strategy") in ("MF-REJ", "CHK") or sig.get("strategy") in PAT_STRATS: return True   # CHK: own checklist rules, 🧪 EXPERIMENTAL (5d72be1 had blocked it)   # own rules; MIN_POST_SCORE does not apply   # own forex strategy with its own filters (session, bias, range, 2/day)
     return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-D1", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
 
 def scan(crypto=True, fx=True, post=True, gen=None):
@@ -124,6 +124,8 @@ def scan(crypto=True, fx=True, post=True, gen=None):
         print("[scan] abandoned scan finished late; results dropped", flush=True); return []
     new = []
     found = [g for g in found if qualifies(g)]   # filtered signals are not saved, so dashboard/stats match what is posted
+    found, thin = binance.liquid(found)   # crypto liquidity floor (MIN_CRYPTO_VOL_USD, 24h quote volume); forex untouched
+    if thin: STATE["skipped_low_volume"] = thin[-20:]
     for sig in found:
         i = db.insert(sig)
         if i: new.append(db.get(i))
