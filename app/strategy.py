@@ -229,7 +229,8 @@ MF_PAIRS = {"USDJPY": ["Asian", "NY"], "GBPJPY": ["London", "NY"],
             # added (one-home-currency rule + backtest filter)
             "AUDUSD": ["NY"], "NZDUSD": ["Asian"], "EURAUD": ["Asian"], "EURCAD": ["NY"], "EURNZD": ["London"],
             "GBPNZD": ["Asian"], "AUDCAD": ["Asian"], "NZDCAD": ["Asian"], "CADCHF": ["London", "NY"],
-            "GBPCNH": ["Asian"]}   # CNH pair: not in FOREX_30, fetched for MF only (forex.MF_EXTRA)
+            "GBPCNH": ["Asian"],
+            "XAUAUD": ["Asian"]}   # synthetic XAUUSD/AUDUSD (forex.SYNTH); 2y backtest 21 trades, +0.37R/trade   # CNH pair: not in FOREX_30, fetched for MF only (forex.MF_EXTRA)
 MF_DESIGNATED = ("USDJPY", "GBPJPY", "EURUSD", "XAUUSD")   # "⭐ Top5" label (remaining original pairs)
 MF_BLOCKED = {"EURJPY": ("Asian", "London", "NY"), "XAUUSD": ("NY",)}   # never signal here, not even as the dynamic strong pair
 MF_MAX_PER_SCAN = 4   # overall MF-REJ cap per scan (designated pairs first, then higher R:R)

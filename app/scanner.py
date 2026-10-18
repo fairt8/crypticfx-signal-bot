@@ -87,9 +87,15 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                   sp, ss = strategy.mf_strong_pair(st, data, pd.Timestamp.now(tz="UTC").floor("h"))   # session of the last closed 1H candle ≈ current hour
                   STATE["mf_strong_pair"] = dict(pair=sp, session=ss)
                   extra = [p for p in forex.MF_EXTRA if p in strategy.MF_PAIRS and p not in data]
+                  xd = {}
+                  for p in [p for p in extra if p in forex.SYNTH and all(q in data for q in forex.SYNTH[p])]:
+                      try: xd[p] = forex.synth_triple(data[forex.SYNTH[p][0]], data[forex.SYNTH[p][1]])   # e.g. XAUAUD = XAUUSD / AUDUSD
+                      except Exception as e: STATE["errors"].append(f"MF synth {p}: {e}")
+                  extra = [p for p in extra if p not in xd]
                   if extra:   # CNH etc.: fetched for MF only, not ranked or scanned by the other strategies
-                      try: xd = forex.provider().fetch_many(extra); cache.update(xd); data = {**data, **xd}
+                      try: xd.update(forex.provider().fetch_many(extra))
                       except Exception as e: STATE["errors"].append(f"MF extra: {e}")
+                  if xd: cache.update(xd); data = {**data, **xd}   # cache -> outcome tracking (stop/TP) on the same synthetic prices
                   cands = []
                   for p in dict.fromkeys(list(strategy.MF_PAIRS) + ([sp] if sp else [])):
                       if p not in data: continue

@@ -9,7 +9,7 @@ def one_home(p,s):
     b,q=p[:3],p[3:]; h=HOME[s]
     return ((b in h)+(q in h))==1   # metals (XAU/XAG) have no home of their own -> session decided by USD
 CNH=['USDCNH','EURCNH','GBPCNH','CHFCNH','CADCNH','AUDCNH','NZDCNH','CNHJPY']   # yfinance 1H available (bt_mfs/cnh.py)
-XAUX=['XAUGBP','XAUEUR']   # synthetic (bt_mfs/xau_cross.py)
+XAUX=['XAUGBP','XAUEUR','XAUAUD']   # synthetic (bt_mfs/xau_cross.py)
 cand=[(p,s) for p in FOREX_30+CNH+XAUX if p not in FIXED for s in HOME if one_home(p,s) and (p,s) not in BLOCK]
 rows=[]
 for f in glob.glob('bt_mfs/ck/1h_*.pkl'): rows+=pickle.load(open(f,'rb'))

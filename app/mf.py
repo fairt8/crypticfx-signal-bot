@@ -62,11 +62,16 @@ def prefetch_htf(symbols, deadline=None):
         from . import forex
         pv = forex.provider()
         if getattr(pv, "name", "") != "yfinance": return
-        tk = {pv.ticker(s): s for s in need}
+        real = list(dict.fromkeys(q for s in need for q in forex.SYNTH.get(s, (s,))))   # synthetic -> its components
+        tk = {pv.ticker(s): s for s in real}
         raw = pv._dl(list(tk), "1h", "1y")   # time-capped download (YF_BUDGET_S)
+        one = {}
         for t, s in tk.items():
+            try: one[s] = pv._norm(raw[t] if t in raw.columns.get_level_values(0) else raw)
+            except Exception: pass
+        for s in need:
             try:
-                a = pv._norm(raw[t] if t in raw.columns.get_level_values(0) else raw)
+                a = forex.synth(one[forex.SYNTH[s][0]], one[forex.SYNTH[s][1]]) if s in forex.SYNTH else one[s]
                 if len(a): _HTF[s] = (now, _h4_from(a))
             except Exception: _HTF[s] = (now - 5*3600, _HTF[s][1]) if s in _HTF else None
         for s in [k for k, v in _HTF.items() if v is None]: _HTF.pop(s)

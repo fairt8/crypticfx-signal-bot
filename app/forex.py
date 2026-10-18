@@ -9,7 +9,21 @@ FOREX_30 = ["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
     "AUDJPY","AUDCAD","AUDCHF","AUDNZD","NZDJPY","NZDCAD","NZDCHF","CADJPY","CADCHF","CHFJPY","XAGUSD","XAUUSD"]
 
 # Extra instruments fetched ONLY for MF-REJ (not ranked/scanned by the other forex strategies)
-MF_EXTRA = ["GBPCNH"]
+MF_EXTRA = ["GBPCNH", "XAUAUD"]
+# Synthetic instruments (no Yahoo ticker): price = base / divisor on common timestamps (bt_mfs/xau_cross.py)
+SYNTH = {"XAUAUD": ("XAUUSD", "AUDUSD")}
+_OHLCV = ["o", "h", "l", "c", "v"]
+def synth(g, f):
+    """g/f: OHLCV frames indexed by time. Wide (conservative) range: high = g.h/f.l, low = g.l/f.h, clipped to o/c."""
+    g = g[_OHLCV]; f = f[_OHLCV]; i = g.index.intersection(f.index); g, f = g.loc[i], f.loc[i]
+    x = pd.DataFrame({"o": g.o/f.o, "c": g.c/f.c, "h": g.h/f.l, "l": g.l/f.h, "v": g.v}, index=i)
+    x["h"] = x[["h", "o", "c"]].max(axis=1); x["l"] = x[["l", "o", "c"]].min(axis=1); return x
+def _h4(a): return a.resample("4h", origin="epoch").agg({"o":"first","h":"max","l":"min","c":"last","v":"sum"}).dropna()
+def synth_triple(dx, dy):
+    """Build (h4, ltf, h1) for a synthetic symbol from two already-fetched (h4, ltf, h1) triples."""
+    ix = lambda d: d.set_index("t")
+    a = synth(ix(dx[2]), ix(dy[2])); b = synth(ix(dx[1]), ix(dy[1]))
+    return (_finish(_h4(a), "4h"), _finish(b, C.LTF_FREQ), _finish(a, "1h"))
 
 # Session windows in UTC (fixed; DST shifts of ~1h are ignored in v1)
 SESSIONS = {"Sydney": (21, 6), "Tokyo": (0, 9), "London": (7, 16), "NewYork": (12, 21)}
@@ -45,14 +59,20 @@ class YFinanceProvider:
         df = df[["o","h","l","c","v"]].copy(); df.index = pd.to_datetime(df.index, utc=True)
         return df
     def fetch_many(self, pairs):
-        tk = {self.ticker(p): p for p in pairs}
+        want = list(dict.fromkeys(pairs)); real = list(dict.fromkeys(q for p in want for q in SYNTH.get(p, (p,))))
+        tk = {self.ticker(p): p for p in real}
         h1 = self._dl(list(tk), "1h", "60d"); m5 = self._dl(list(tk), C.LTF, "10d")
-        out = {}
+        norm = {}
         for t, p in tk.items():
+            try: norm[p] = (self._norm(h1[t]), self._norm(m5[t]))
+            except Exception: pass
+        out = {}
+        for p in want:
             try:
-                a = self._norm(h1[t]); b = self._norm(m5[t])
-                h4 = a.resample("4h", origin="epoch").agg({"o":"first","h":"max","l":"min","c":"last","v":"sum"}).dropna()
-                out[p] = (_finish(h4, "4h"), _finish(b, C.LTF_FREQ), _finish(a, "1h"))
+                if p in SYNTH:
+                    x, y = SYNTH[p]; a = synth(norm[x][0], norm[y][0]); b = synth(norm[x][1], norm[y][1])
+                else: a, b = norm[p]
+                out[p] = (_finish(_h4(a), "4h"), _finish(b, C.LTF_FREQ), _finish(a, "1h"))
             except Exception:
                 pass
         return out

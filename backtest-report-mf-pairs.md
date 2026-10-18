@@ -1,8 +1,8 @@
 # MF-REJ pair expansion (one-home-currency rule)
 
-Home currencies: Asian JPY AUD NZD CNH | London GBP EUR CHF | NY USD CAD; gold/silver have no home (USD/GBP/EUR leg decides). Candidate = exactly one currency at home. Universe: forex.FOREX_30 + CNH pairs with yfinance 1H data + synthetic XAUGBP/XAUEUR (GC=F / GBPUSD|EURUSD, wide highs/lows; bt_mfs/xau_cross.py).
-Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H touches or 4H/Daily level, pad 0.5 ATR, next-zone TP ≥ 0.5R), 2 signals/day/pair. 1H 2024-10-15 → 2026-10-15, Y1 to 2025-10-15. Costs 0.02% USD majors, 0.03% crosses + CNH, 0.05% metals. Keep: R/trade ≥ −0.05 and not negative in both years.
-User 2026-10-17: EURJPY removed and XAUUSD NY removed (blocked also for the dynamic strong pair; previously EURJPY Asian 8/−0.41R, London 6/−0.47R; XAUUSD NY 7/−0.71R).
+Home currencies: Asian JPY AUD NZD CNH | London GBP EUR CHF | NY USD CAD; gold/silver have no home (the currency leg decides). Candidate = exactly one currency at home. Universe: forex.FOREX_30 + CNH pairs with yfinance 1H data + synthetic XAUGBP / XAUEUR / XAUAUD (GC=F divided by GBPUSD / EURUSD / AUDUSD on common hours, wide highs/lows; bt_mfs/xau_cross.py).
+Rules: exact live strong-zone MF-REJ (body Daily+4H bias, strong zone = 2+ 1H touches or 4H/Daily level, pad 0.5 ATR, next-zone TP ≥ 0.5R), 2 signals/day/pair. 1H 2024-10-15 → 2026-10-15, Y1 to 2025-10-15. Costs 0.02% USD majors, 0.03% crosses + CNH, 0.05% metals (incl. synthetic gold crosses). Keep: R/trade ≥ −0.05 and not negative in both years.
+User 2026-10-17: EURJPY removed and XAUUSD NY removed (also blocked for the dynamic strong pair; previously EURJPY Asian 8/−0.41R, London 6/−0.47R; XAUUSD NY 7/−0.71R). XAUAUD Asian passed and is live (synthetic XAUUSD/AUDUSD data path: forex.SYNTH); XAUGBP / XAUEUR London failed.
 
 ## Top5 (designated)
 
@@ -30,6 +30,7 @@ User 2026-10-17: EURJPY removed and XAUUSD NY removed (blocked also for the dyna
 |CADCHF|London|3|67|+0.06|+0.02|2/50%/-0.84|1/100%/+0.90|
 |CADCHF|NY|3|100|+1.86|+0.62|2/100%/+1.14|1/100%/+0.72|
 |GBPCNH|Asian|13|77|-0.10|-0.01|9/78%/-0.12|4/75%/+0.02|
+|XAUAUD|Asian|21|62|+7.70|+0.37|13/69%/+7.72|8/50%/-0.01|
 
 ## Excluded
 
@@ -71,3 +72,5 @@ User 2026-10-17: EURJPY removed and XAUUSD NY removed (blocked also for the dyna
 |CADCNH|NY|9|56|-2.37|-0.26|4/50%/-1.49|5/60%/-0.88|
 |XAUGBP|London|21|52|-3.06|-0.15|5/0%/-6.11|16/69%/+3.05|
 |XAUEUR|London|19|37|-8.86|-0.47|6/50%/-1.53|13/31%/-7.33|
+
+Kept total: 134 trades / 2y ≈ 5.6 per month, net +24.4R.
