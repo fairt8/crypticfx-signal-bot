@@ -247,6 +247,19 @@ def start():
     if info.get("url"): requests.post(API("deleteWebhook"), timeout=20)
     MODE["state"] = "polling"; threading.Thread(target=poll_forever, daemon=True).start()
 
+_WH = {}
+def webhook_info():
+    """Safe diagnostic (no token/secret): is Telegram delivering to this service's webhook, pending updates, last error."""
+    if not enabled(): return None
+    if "res" not in _WH or time.time() - _WH.get("t", 0) > 120:
+        try:
+            i = requests.get(API("getWebhookInfo"), timeout=10).json().get("result", {}); url = i.get("url") or ""
+            want = (C.PUBLIC_URL.rstrip("/") + "/telegram/webhook") if C.PUBLIC_URL else None
+            res = dict(points_here=bool(want) and url == want, host=url.split("/")[2] if url.count("/") >= 2 else None,
+                       pending=i.get("pending_update_count"), last_error=i.get("last_error_message"), last_error_date=i.get("last_error_date"))
+        except Exception as e: res = dict(error=type(e).__name__)
+        _WH.update(res=res, t=time.time())
+    return _WH["res"]
 _SHAPE = {}
 def token_shape():
     """Safe diagnostic: never returns the token or any part of it."""
