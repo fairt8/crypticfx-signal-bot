@@ -110,6 +110,7 @@ def _live_line(r):
 def _closed_line(r):
     ic = {"tp": "✅", "sl": "❌", "be": "➖"}.get(r["status"]) or ("✅" if (r.get("net_r") or 0) > 0 else "❌")
     return f"{ic} {_hdr(r)}\n    {_sg(r.get('net_r'), 'R')}   {_sg(r.get('net_pct'), '%')}   <i>closed {_wat(r['closed_at'])} WAT</i>"
+TG_MAX = 40   # rows per Telegram list (totals always cover all rows)
 PLBL = {"day": "today (24h)", "today": "today (24h)", "week": "last 7 days", "month": "last 30 days", "all": "all time"}
 def cmd_trades_state(state, arg):
     from . import trades as T
@@ -120,24 +121,28 @@ def cmd_trades_state(state, arg):
         rows.sort(key=lambda r: -(r.get("live_net_r") if r.get("live_net_r") is not None else -99))
         tot = sum(r.get("live_net_r") or 0 for r in rows); up = sum((r.get("live_r") or 0) > 0 for r in rows)
         L = [f"📈 <b>Currently trading</b> ({len(rows)} open)", f"💰 Live total {_sg(tot, 'R')} net   ·   🟩 {up} in profit / 🟥 {len(rows)-up}", "━━━━━━━━━━━━"]
-        L += [_live_line(r) + "\n" for r in rows] or ["No open trades."]
+        L += [_live_line(r) + "\n" for r in rows[:TG_MAX]] or ["No open trades."]
     elif state == "closed":
         w = sum((r.get("result_r") or 0) > 0 for r in rows); n = sum(r.get("net_r") or 0 for r in rows)
         L = [f"🏁 <b>Closed trades</b> · {PLBL[per]} ({len(rows)})",
              f"🎯 Win {round(100*w/len(rows)) if rows else 0}%   ·   💰 {_sg(n, 'R')} net (after fees)", "━━━━━━━━━━━━"]
-        L += [_closed_line(r) + "\n" for r in rows] or ["No closed trades in this period."]
+        bs = {}
+        for r in rows: b = bs.setdefault("FOREX MF-REJ" if r["strategy"] == "MF-REJ" else r["strategy"], [0, 0, 0.0]); b[0] += 1; b[1] += (r.get("result_r") or 0) > 0; b[2] += r.get("net_r") or 0
+        if len(bs) > 1: L += [f"• <b>{esc(k)}</b>: {v[0]} · win {round(100*v[1]/v[0])}% · {v[2]:+.2f}R" for k, v in sorted(bs.items(), key=lambda kv: -kv[1][2])] + ["━━━━━━━━━━━━"]
+        L += [_closed_line(r) + "\n" for r in rows[:TG_MAX]] or ["No closed trades in this period."]
     elif state == "pending":
         L = [f"⏳ <b>Pending</b> – signalled, entry not hit yet · {PLBL[per]} ({len(rows)})", "<i>Limit entries expire if not filled in time.</i>", "━━━━━━━━━━━━"]
-        L += [f"{_hdr(r)}\n    📍 entry {code(r['entry'])}   🛑 {code(r['sl'])}   🎯 {code(r['tp'])}\n    <i>signalled {_wat(r['created_at'])} WAT</i>\n" for r in rows] or ["Nothing pending."]
+        L += [f"{_hdr(r)}\n    📍 entry {code(r['entry'])}   🛑 {code(r['sl'])}   🎯 {code(r['tp'])}\n    <i>signalled {_wat(r['created_at'])} WAT</i>\n" for r in rows[:TG_MAX]] or ["Nothing pending."]
     else:
         L = [f"🆕 <b>New signals</b> · {PLBL[per]} ({len(rows)})", "━━━━━━━━━━━━"]
         st = {"pending": "⏳ pending", "open": "📈 open", "tp": "✅ TP", "sl": "❌ SL", "be": "➖ BE", "expired": "⌛ expired", "closed": "🏁 closed"}
-        for r in rows:
+        for r in rows[:TG_MAX]:
             x = f"{_hdr(r)}\n    {st.get(r['status'], esc(r['status']))}   📍 {code(r['entry'])}   <i>{_wat(r['created_at'])} WAT</i>"
             if r.get("live_r") is not None: x += f"\n    live {_sg(r['live_pct'], '%')} {_sg(r['live_r'], 'R')}"
             if r.get("net_r") is not None: x += f"\n    result {_sg(r['net_r'], 'R')} {_sg(r['net_pct'], '%')}"
             L.append(x + "\n")
         if not rows: L.append("No new signals in this period.")
+    if len(rows) > TG_MAX: L.append(f"<i>…and {len(rows)-TG_MAX} more – full list on the dashboard (Trades &amp; PnL), or /pnl SYMBOL.</i>")
     return "\n".join(L)
 def cmd_symbol(arg, full):
     from . import trades as T
