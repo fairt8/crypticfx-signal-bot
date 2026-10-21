@@ -10,6 +10,7 @@ app.include_router(_miniapp)   # Telegram Mini App: /app + owner-only /app/api/*
 @app.on_event("startup")
 def _start():
     db.init(); don20.init(); telegram.start(); summary.start()
+    from . import alerts; alerts.apply_migrations()   # one-time, user-approved alert-mode switch (stored in the DB)
     don20.start(scanner.crypto_universe, lambda: bool(scanner.STATE.get("leader")))
     if C.ENABLE_SCHEDULER: scanner.start()
 @app.on_event("shutdown")

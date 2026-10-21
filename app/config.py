@@ -44,7 +44,7 @@ MIN_STOP_PCT_CRYPTO = float(E("MIN_STOP_PCT_CRYPTO", "0.3"))  # skip crypto setu
 MIN_STOP_PCT_FOREX = float(E("MIN_STOP_PCT_FOREX", "0"))
 # confidence % = logistic(a + b*raw_setup_score), fitted on closed backtest trades. Forex slope was negative/noise -> flat base rate.
 EXPERIMENTAL_MARKETS = set(E("EXPERIMENTAL_MARKETS", "crypto").split(","))  # backtest edge (if any) was crypto-only
-ENABLE_CHK = E("ENABLE_CHK", "1") == "1"   # CHK: 🧪 EXPERIMENTAL (paper) since 2026-10-18
+ENABLE_CHK = E("ENABLE_CHK", "0") == "1"   # CHK: 🧪 EXPERIMENTAL, PAUSED since 2026-10-21 (no new live signals; open trades run on; backtest_all keeps it). Re-enable: ENABLE_CHK=1
 MIN_CRYPTO_VOL_USD = float(E("MIN_CRYPTO_VOL_USD", "1000000"))   # skip NEW crypto signals (all strategies) when 24h quote volume < this; 0 = off (bt_filters/backtest-report-filters.md)
 CHK_CONFIDENCE = int(E("CHK_CONFIDENCE", "27"))  # observed CHK crypto win rate across the whole backtest (~27%: 22.4% IS, 30.7% OOS)
 FVG_STOP = E("FVG_STOP", "fvg")  # "fvg" = beyond the 3 FVG candles (video); "swing" = swing low/high of the leg (creator PDF plan)

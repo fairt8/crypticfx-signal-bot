@@ -34,6 +34,12 @@ def set_mode(m):
     if not m: raise ValueError("mode must be one of: all, primary, profitable, both")
     db.kv_set(KEY_MODE, m); return m
 
+MIGRATIONS = [("migration:2026-10-21-alert-mode-profitable", "profitable")]   # user-approved one-time switches (later /alerts changes win)
+def apply_migrations():
+    for key, m in MIGRATIONS:
+        try:
+            if not db.kv_get(key): set_mode(m); db.kv_set(key, datetime.now(timezone.utc).isoformat())
+        except Exception: pass
 def compute():
     """Per active strategy: live window stats, backtest fallback, verdict."""
     from . import trades, webapp

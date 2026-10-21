@@ -2,7 +2,7 @@
 primary / normal / experimental = active (new signals); retired = no new signals, history kept, code kept (backtest_all)."""
 STATUS = {
     "DON20": "primary",
-    "CHK": "experimental",   # user 2026-10-18: PRIMARY -> EXPERIMENTAL (paper test; posts again)
+    "CHK": "experimental",   # 2026-10-18 PRIMARY -> EXPERIMENTAL; 2026-10-21 paused (ENABLE_CHK=0, backtest-only)
     "FVG-D1": "normal", "FVG-PLAN": "normal",
     "MF-REJ": "experimental", "BRK": "experimental", "PAT-TRIPLE": "experimental",
     "FVG": "retired", "FVG+TREND": "retired", "PAT-WEDGE": "retired", "PAT-CUP": "retired",
@@ -20,9 +20,14 @@ def eff(strategy, tags=()):
     if strategy == "FVG" and "FVG-D1" in (tags or ()): return "FVG-D1"
     return strategy or "FVG"
 def status(k): return STATUS.get(k, "experimental")
-def label(k): return LABEL[status(k)]
+def paused(k):
+    """Active strategy with new live signals switched off by its env flag (open trades still tracked, backtest kept)."""
+    if k == "CHK":
+        from . import config as C; return not C.ENABLE_CHK
+    return False
+def label(k): return LABEL[status(k)] + (" (paused)" if paused(k) else "")
 def active(k): return status(k) != "retired"
 def name(k): return NAME.get(k, k)
 def full(k): return f"{label(k)} · {name(k)}"
 def main_stats(k): return status(k) in ("primary", "normal")   # dashboard/summary headline stats: PRIMARY + NORMAL only
-def listing(): return [dict(key=k, status=status(k), label=label(k), name=name(k)) for s in ORDER for k in STATUS if STATUS[k] == s]
+def listing(): return [dict(key=k, status=status(k), label=label(k), name=name(k), paused=paused(k)) for s in ORDER for k in STATUS if STATUS[k] == s]
