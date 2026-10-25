@@ -47,6 +47,7 @@ def prices(syms_crypto, syms_fx, ttl=60):
         if syms_crypto and (not fresh or not _PX["crypto"]):
             try: _PX["crypto"] = _crypto_prices()
             except Exception: pass
+        if len(_PX["fx"]) > 200: _PX["fx"].clear()   # bounded (refilled just below)
         miss = [p for p in syms_fx if not fresh or p not in _PX["fx"]]
         if miss:
             try: _PX["fx"].update(_fx_prices(miss))

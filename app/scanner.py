@@ -28,7 +28,7 @@ def patterns_for(data, market, found, budget_end):
             for g in sigs: got.setdefault(g["strategy"], []).append(g)
             _PAT_DONE.add(key)
         except Exception as e: STATE["errors"].append(f"patterns {s}: {e}")
-    if len(_PAT_DONE) > 20000: _PAT_DONE.clear()
+    if len(_PAT_DONE) > C.PAT_DONE_MAX: _PAT_DONE.clear()   # ~1 key per symbol per 4H bar; bounded
     for k, L in got.items(): found.extend(L[:max(0, C.PAT_MAX_PER_SCAN - sum(g.get("strategy") == k for g in found))])   # cap per strategy per whole scan
     STATE.setdefault("pat_counts", {})[market] = {k: len(L) for k, L in got.items()}
 

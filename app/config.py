@@ -49,6 +49,8 @@ MIN_CRYPTO_VOL_USD = float(E("MIN_CRYPTO_VOL_USD", "1000000"))   # skip NEW cryp
 CHK_CONFIDENCE = int(E("CHK_CONFIDENCE", "27"))  # observed CHK crypto win rate across the whole backtest (~27%: 22.4% IS, 30.7% OOS)
 FVG_STOP = E("FVG_STOP", "fvg")  # "fvg" = beyond the 3 FVG candles (video); "swing" = swing low/high of the leg (creator PDF plan)
 DAILY_REFRESH_HOURS = float(E("DAILY_REFRESH_HOURS", "6"))
+CACHE_MAX_SYMBOLS = int(E("CACHE_MAX_SYMBOLS", "600"))   # cap on per-symbol in-memory candle caches (binance._DAILY)
+PAT_DONE_MAX = int(E("PAT_DONE_MAX", "5000"))          # cap on the PAT/BRK "bar already evaluated" set
 ENABLE_D1 = E("ENABLE_D1", "1") == "1"
 CALIB = {"crypto": (-1.3039, 0.00523), "forex": (-1.0018, 0.0)}  # refit 13 Oct on 15m FVG backtest (backtest-report-v2.md)
 ENABLE_FVG_PLAN = E("ENABLE_FVG_PLAN", "1") == "1"    # FVG-PLAN swing-stop variant: NORMAL strategy again (user 2026-10-18)

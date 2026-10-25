@@ -75,6 +75,7 @@ def prefetch_htf(symbols, deadline=None):
                 if len(a): _HTF[s] = (now, _h4_from(a))
             except Exception: _HTF[s] = (now - 5*3600, _HTF[s][1]) if s in _HTF else None
         for s in [k for k, v in _HTF.items() if v is None]: _HTF.pop(s)
+        from .binance import _trim; _trim(_HTF, 12*3600, 40)   # bounded: forex pairs only, 1y of 4H bars each
     except Exception: pass
 def htf_h4(symbol, fallback):
     now = _time.time(); c = _HTF.get(symbol)

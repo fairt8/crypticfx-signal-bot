@@ -56,7 +56,15 @@ def daily(symbol):
     hit = _DAILY.get(symbol)
     if hit and _t.time() - hit[0] < C.DAILY_REFRESH_HOURS*3600: return hit[1]
     df = klines(symbol, "1d", 200)[["t","h","l","c","ct"]]
-    _DAILY[symbol] = (_t.time(), df); return df
+    _DAILY[symbol] = (_t.time(), df); _trim(_DAILY, C.DAILY_REFRESH_HOURS*3600*2, C.CACHE_MAX_SYMBOLS); return df
+def _trim(cache, max_age_s, max_n):
+    """Bound a {key: (fetched_at, value)} cache: drop entries older than max_age_s, then the oldest beyond max_n.
+    (The crypto universe churns every few hours, so without this delisted/rotated symbols stayed in RAM forever.)"""
+    import time as _t
+    now = _t.time()
+    for k in [k for k, v in list(cache.items()) if not v or now - v[0] > max_age_s]: cache.pop(k, None)
+    if len(cache) > max_n:
+        for k, _ in sorted(cache.items(), key=lambda kv: kv[1][0])[:len(cache) - max_n]: cache.pop(k, None)
 
 def fetch_pair(symbol):
     return klines(symbol, "4h", 300), klines(symbol, C.LTF, 400), (klines(symbol, "1h", 300) if C.ENABLE_CHK else None)
