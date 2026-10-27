@@ -22,19 +22,21 @@ ALIASES = {"both": "primary_or_profitable", "primary+profitable": "primary_or_pr
 MODE_LABEL = {"all": "🔔 All signals", "primary": "⭐ PRIMARY only", "profitable": "💰 Profitable strategies only",
               "primary_or_profitable": "⭐ PRIMARY + 💰 profitable"}
 TIERS = ("primary", "normal", "experimental", "profitable")
+DEFAULT_MODE = "primary_or_profitable"   # ⭐ PRIMARY (DON20, CHK) always + 💰 currently profitable strategies
 KEY_MODE, KEY_PROFIT, KEY_MUTED = "setting:alert_mode", "profitable:last", "alerts:muted"
 
 def norm_mode(m):
     m = (m or "").strip().lower(); m = ALIASES.get(m, m); return m if m in MODES else None
 def get_mode():
-    try: return norm_mode(db.kv_get(KEY_MODE)) or "all"
-    except Exception: return "all"
+    try: return norm_mode(db.kv_get(KEY_MODE)) or DEFAULT_MODE
+    except Exception: return DEFAULT_MODE
 def set_mode(m):
     m = norm_mode(m)
     if not m: raise ValueError("mode must be one of: all, primary, profitable, both")
     db.kv_set(KEY_MODE, m); return m
 
-MIGRATIONS = [("migration:2026-10-21-alert-mode-profitable", "profitable")]   # user-approved one-time switches (later /alerts changes win)
+MIGRATIONS = [("migration:2026-10-21-alert-mode-profitable", "profitable"),
+              ("migration:2026-10-27-alert-mode-primary-or-profitable", "primary_or_profitable")]   # user-approved one-time switches (later /alerts changes win)
 def apply_migrations():
     for key, m in MIGRATIONS:
         try:

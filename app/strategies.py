@@ -2,7 +2,7 @@
 primary / normal / experimental = active (new signals); retired = no new signals, history kept, code kept (backtest_all)."""
 STATUS = {
     "DON20": "primary",
-    "CHK": "experimental",   # 2026-10-18 PRIMARY -> EXPERIMENTAL; 2026-10-21 paused (ENABLE_CHK=0, backtest-only)
+    "CHK": "primary",   # 2026-10-18 PRIMARY -> EXPERIMENTAL; 2026-10-21 paused; 2026-10-27 user: back to PRIMARY, live again (ENABLE_CHK=1)
     "FVG-D1": "normal", "FVG-PLAN": "normal",
     "MF-REJ": "experimental", "BRK": "experimental", "PAT-TRIPLE": "experimental",
     "FVG": "retired", "FVG+TREND": "retired", "PAT-WEDGE": "retired", "PAT-CUP": "retired",

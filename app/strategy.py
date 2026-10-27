@@ -166,7 +166,7 @@ def analyze_chk(symbol, market, h4, h1, max_age_min=60, sr_atr=0.5):
     return dict(symbol=symbol, market=market, direction=d, entry=entry, sl=sl, tp=float(tp), rr=C.RR,
         htf_top=float(hi), htf_bottom=float(lo), htf_time=str(h1.t.iloc[i]), tap_time=str(h1.t.iloc[i]), confirm_time=str(now),
         price_now=entry, in_session=in_major_session(now.to_pydatetime()), confidence=C.CHK_CONFIDENCE, setup_score=ind,
-        strategy="CHK", tags=["CHK"], experimental=1, status="open", filled_at=str(now), reasons=why)
+        strategy="CHK", tags=["CHK"], experimental=0, status="open", filled_at=str(now), reasons=why)
 
 def watch_info(symbol, market, h4, ltf):
     """For summaries only (does NOT create signals): most recent unfilled 4H FVG aligned with the 4H EMA trend,
