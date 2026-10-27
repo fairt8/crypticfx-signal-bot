@@ -1,0 +1,47 @@
+period 2024-02-23 -> 2026-10-26 coins 131 median risk % 21.9
+season days {'bull': 383, 'bear': 280, 'n/a': 199, 'range': 137}
+current (3xATR chandelier)                 n=2471 win=36.6% net= +120.4 avg=+0.049 mdd=173.5 hold=23.5d open=58(+26.8) | bull +188.8/997 (0.189) bear +36.3/676 (0.054) range -81.6/382 | L +112.6/1228 S +7.8/1243 | 120d +129.7/271
+fixed TP 1R                                n=3203 win=44.4% net=  -24.7 avg=-0.008 mdd=139.9 hold=14.6d open=51(+0.0) | bull +65.0/1321 (0.049) bear -7.5/836 (-0.009) range -106.7/516 | L -51.7/1676 S +27.0/1527 | 120d +34.4/403
+fixed TP 1.5R                              n=2874 win=38.7% net=  +50.5 avg=+0.018 mdd=131.6 hold=18.0d open=51(+2.7) | bull +113.3/1185 (0.096) bear +9.0/764 (0.012) range -83.6/463 | L +4.1/1505 S +46.4/1369 | 120d +73.3/364
+fixed TP 2R                                n=2729 win=37.7% net=  +87.7 avg=+0.032 mdd=139.9 hold=19.8d open=52(+4.1) | bull +138.5/1133 (0.122) bear +20.3/725 (0.028) range -68.0/436 | L +30.8/1423 S +56.9/1306 | 120d +67.9/339
+fixed TP 3R                                n=2616 win=36.7% net=  +82.8 avg=+0.032 mdd=152.7 hold=21.5d open=55(+12.1) | bull +161.5/1089 (0.148) bear +20.9/691 (0.03) range -83.3/413 | L +34.8/1346 S +48.0/1270 | 120d +83.4/315
+50% at 1R + stop to BE                     n=2542 win=46.1% net=  +70.4 avg=+0.028 mdd=126.4 hold=22.4d open=55(+16.9) | bull +111.3/1035 (0.108) bear +32.5/683 (0.048) range -89.8/398 | L +25.4/1286 S +45.0/1256 | 120d +73.7/292
+50% at 1.5R + stop to BE                   n=2486 win=39.5% net=  +90.6 avg=+0.036 mdd=145.0 hold=23.3d open=56(+24.5) | bull +131.3/1005 (0.131) bear +32.9/677 (0.049) range -76.7/386 | L +48.2/1239 S +42.4/1247 | 120d +89.0/275
+2xATR chandelier trail                     n=3264 win=35.4% net=   +2.6 avg=+0.001 mdd=136.7 hold=13.1d open=43(+6.6) | bull +41.0/1397 (0.029) bear +24.8/841 (0.029) range -60.4/531 | L +47.5/1623 S -45.0/1641 | 120d +60.0/408
+Donchian-10 exit                           n=3056 win=33.4% net=  +82.0 avg=+0.027 mdd=233.7 hold=16.2d open=48(+8.6) | bull +69.1/1284 (0.054) bear -0.5/806 (-0.001) range -18.0/508 | L +208.3/1383 S -126.4/1673 | 120d +111.0/346
+50% at 1R + BE + Donchian-10               n=3115 win=40.2% net=  +13.0 avg=+0.004 mdd=169.5 hold=15.3d open=48(+9.1) | bull +23.3/1309 (0.018) bear +0.0/813 (0.0) range -41.9/517 | L +81.3/1440 S -68.3/1675 | 120d +53.9/360
+time exit 10 days                          n=3893 win=42.9% net=  +18.7 avg=+0.005 mdd=191.8 hold=9.0d open=37(+0.5) | bull +49.6/1595 (0.031) bear +14.9/1085 (0.014) range -54.4/643 | L +134.9/1730 S -116.3/2163 | 120d +95.6/461
+time exit 20 days                          n=3213 win=40.8% net=  +97.7 avg=+0.030 mdd=204.5 hold=14.7d open=56(-1.3) | bull +195.2/1294 (0.151) bear +23.0/879 (0.026) range -92.5/526 | L +164.0/1462 S -66.3/1751 | 120d +133.0/374
+tighter: 1.5xATR stop + 1.5xATR trail      n=3773 win=34.0% net=  -44.3 avg=-0.012 mdd=304.2 hold=8.3d open=35(+11.2) | bull -39.1/1636 (-0.024) bear +59.0/976 (0.061) range -83.3/611 | L +78.7/1874 S -123.0/1899 | 120d +82.0/486
+tighter: 2xATR stop + 2xATR trail          n=3283 win=34.9% net=  -12.4 avg=-0.004 mdd=200.1 hold=12.9d open=43(+9.8) | bull +52.5/1403 (0.037) bear +31.2/844 (0.037) range -89.4/537 | L +53.3/1640 S -65.7/1643 | 120d +65.9/417
+current exits + skip BTC 'range' season    n=2214 win=37.9% net= +164.2 avg=+0.074 mdd=153.4 hold=24.2d open=58(+25.4) | bull +152.8/1090 (0.14) bear +34.7/708 (0.049) range +0.0/0 | L +102.0/1100 S +62.2/1114 | 120d +96.6/221
+current exits + with-trend only (long in bull, short in bear) n=1054 win=40.6% net= +210.2 avg=+0.199 mdd= 84.8 hold=22.7d open=19(+20.9) | bull +165.0/634 (0.26) bear +45.2/420 (0.108) range +0.0/0 | L +165.0/634 S +45.2/420 | 120d +37.3/153
+50% at 1.5R + BE + skip 'range'            n=2224 win=40.7% net= +136.0 avg=+0.061 mdd=122.2 hold=23.9d open=56(+23.4) | bull +102.5/1095 (0.094) bear +30.5/711 (0.043) range +0.0/0 | L +41.3/1108 S +94.7/1116 | 120d +62.2/222
+BTC season last 10 days: {datetime.date(2026, 10, 17): 'bull', datetime.date(2026, 10, 18): 'bull', datetime.date(2026, 10, 19): 'bull', datetime.date(2026, 10, 20): 'bull', datetime.date(2026, 10, 21): 'bull', datetime.date(2026, 10, 22): 'bull', datetime.date(2026, 10, 23): 'bull', datetime.date(2026, 10, 24): 'bull', datetime.date(2026, 10, 25): 'bull', datetime.date(2026, 10, 26): 'bull'}
+
+fair comparison, only trades opened when a season is known (from ~Sep 2024):
+current (3xATR chandelier)                                     n=2055 win=36.4% net= +143.6 avg=+0.070 mdd=153.5
+fixed TP 1R                                                    n=2673 win=44.0% net=  -49.1 avg=-0.018 mdd=128.3
+fixed TP 1.5R                                                  n=2412 win=38.7% net=  +38.7 avg=+0.016 mdd=129.9
+fixed TP 2R                                                    n=2294 win=37.6% net=  +90.8 avg=+0.040 mdd=122.9
+fixed TP 3R                                                    n=2193 win=36.5% net=  +99.1 avg=+0.045 mdd=130.7
+50% at 1R + stop to BE                                         n=2116 win=45.1% net=  +54.0 avg=+0.026 mdd=119.8
+50% at 1.5R + stop to BE                                       n=2068 win=39.2% net=  +87.5 avg=+0.042 mdd=123.2
+2xATR chandelier trail                                         n=2769 win=34.8% net=   +5.3 avg=+0.002 mdd=136.7
+Donchian-10 exit                                               n=2598 win=31.9% net=  +50.7 avg=+0.020 mdd=233.7
+50% at 1R + BE + Donchian-10                                   n=2639 win=38.7% net=  -18.6 avg=-0.007 mdd=169.5
+time exit 10 days                                              n=3323 win=42.8% net=  +10.0 avg=+0.003 mdd=191.8
+time exit 20 days                                              n=2699 win=41.1% net= +125.7 avg=+0.047 mdd=164.8
+tighter: 1.5xATR stop + 1.5xATR trail                          n=3223 win=33.2% net=  -63.4 avg=-0.020 mdd=304.2
+tighter: 2xATR stop + 2xATR trail                              n=2784 win=34.3% net=   -5.6 avg=-0.002 mdd=200.1
+current exits + skip BTC 'range' season                        n=1798 win=37.9% net= +187.5 avg=+0.104 mdd=153.4
+current exits + with-trend only (long in bull, short in bear)  n=1054 win=40.6% net= +210.2 avg=+0.199 mdd= 84.8
+50% at 1.5R + BE + skip 'range'                                n=1806 win=40.7% net= +133.0 avg=+0.074 mdd=122.2
+
+by entry year (closed net R / trades):
+current (3xATR chandelier)                                     2024: +74.6/798 2025: -70.4/883 2026: +116.2/790
+fixed TP 2R                                                    2024: +21.6/879 2025: -30.8/956 2026: +96.9/894
+50% at 1.5R + stop to BE                                       2024: +42.4/802 2025: -51.1/888 2026: +99.3/796
+time exit 20 days                                              2024: +46.5/978 2025: -87.5/1243 2026: +138.6/992
+current exits + skip BTC 'range' season                        2024: +116.3/681 2025: -35.9/793 2026: +83.9/740
+current exits + with-trend only (long in bull, short in bear)  2024: +169.4/167 2025: -69.1/461 2026: +109.9/426
