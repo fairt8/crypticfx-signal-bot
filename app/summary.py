@@ -3,11 +3,9 @@ import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
 from .telegram import fmt_price
-NAMES = {"FVG": "FVG", "FVG+TREND": "FVG+4H trend [EXP]", "CHK": "⭐ CHK checklist [PRIMARY]", "FVG-PLAN": "FVG plan [EXP]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "FOREX MF-REJ [experimental – collecting live results]", "DON20": "⭐ DON20 [PRIMARY]",
-         "PAT-WEDGE": "PAT-WEDGE [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE [EXPERIMENTAL – paper]", "PAT-CUP": "PAT-CUP [EXPERIMENTAL – paper]", "BRK": "BRK [EXPERIMENTAL – paper]"}
 def label(r):
     from . import strategies as SG
-    k = SG.eff(r.get("strategy"), r.get("tags")); return f"{k} {SG.label(k)}"
+    k = SG.eff(r.get("strategy"), r.get("tags")); return f"{SG.label(k).split()[0]} {SG.short(k)}"
 def build(hours=2):
     from .telegram import esc, code, wat
     now = datetime.now(timezone.utc); since = (now - timedelta(hours=hours)).isoformat()
@@ -37,16 +35,16 @@ def build(hours=2):
     bs = db.by_strategy()
     L += ["", "📈 <b>Live stats</b> <i>(60d, net after costs)</i>"]
     ret = [k for k, v in bs.items() if v.get("status") == "retired"]
-    for k, v in bs.items():   # PRIMARY, NORMAL, EXPERIMENTAL
+    for k, v in sorted(bs.items(), key=lambda kv: SG.ORDER.index(SG.status(kv[0]))):   # ⭐ PRIMARY, then 🔷 SECONDARY
         if v.get("status") == "retired": continue
         wr = v['win_rate'] if v['win_rate'] is not None else '—'
         dot = "🟢" if v['net_r'] > 0 else ("🔴" if v['net_r'] < 0 else "⚪")
         extra = f" · {v.get('open',0)} open" if k == "DON20" else ""
-        L.append(f"{dot} {esc(v.get('label', k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
+        L.append(f"{dot} {SG.label(k).split()[0]} {esc(SG.short(k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
     try:
         from . import alerts
         mode = alerts.get_mode()
-        if mode != "all":
+        if mode == "primary":   # 🔷 SECONDARY muted
             mu = alerts.muted_since(hours); by = {}
             for m in mu: by[m["strategy"]] = by.get(m["strategy"], 0) + 1
             L += ["", f"🔕 <b>Alert mode:</b> {esc(alerts.MODE_LABEL[mode])} · {len(mu)} signal(s) muted in {hours}h"

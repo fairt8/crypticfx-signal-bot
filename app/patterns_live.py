@@ -1,4 +1,4 @@
-"""PAT-* and BRK [EXPERIMENTAL – paper]: 4H chart-pattern retest/breakout signals.
+"""PAT-* and BRK: 4H chart-pattern retest/breakout signals (tiers in app/strategies.py, live stop variants in app/variants.py).
 Rules are the ones backtested in backtest-report-retest-cup.md (bt_retest_cup.py / bt_cup2.py) and backtest-report-brk.md.
 The same scan_series() produces both the backtest trades and the live signals (live = entries on the last closed 4H bar).
 Pattern detector copied verbatim from app/backtest_patterns.py (pivots k=3, equal tops within 0.5 ATR)."""
@@ -187,8 +187,9 @@ WEDGES = {"RISING_WEDGE","FALLING_WEDGE"}; TRIPLES = {"TRIPLE_TOP","TRIPLE_BOTTO
 BRK_NAMES = {"DOUBLE_TOP","DOUBLE_BOTTOM","TRIPLE_TOP","TRIPLE_BOTTOM","BULL_FLAG","BEAR_FLAG","ASC_TRIANGLE","DESC_TRIANGLE","RISING_WEDGE","FALLING_WEDGE","RECTANGLE"}
 # strategy -> (market, pattern names, cups, entry mode, stop mode, tracked R, backtest win%, backtest note)
 PAT = {
- "PAT-WEDGE":  ("crypto", WEDGES, False, "retest", "lvl",   3.0, 27, "2y 4H backtest (one signal per coin/bar): 1,598 trades, 27% win at 1:3, IS -0.02R / OOS +0.11R per trade net"),
+ "PAT-WEDGE":  ("crypto", WEDGES, False, "retest", "lvl",   3.0, 28, "3y crypto backtest (Oct 2023–Oct 2026), 1.5× pattern stop, fixed 3R: 28% win, positive net R per trade (research/stop_variants_3r)"),
  "PAT-TRIPLE": ("forex",  TRIPLES, False, "retest", "lvl",  1.5, 54, "2y 4H backtest: 125 trades, 54% win at 1:1.5, IS +0.10R / OOS +0.37R per trade net (small sample)"),
+ "PAT-TRIPLE-C": ("crypto", TRIPLES, False, "retest", "lvl", 3.0, 28, "3y crypto backtest (Oct 2023–Oct 2026), 2× pattern stop, fixed 3R: 28% win, positive net R per trade (research/stop_variants_3r)"),
  "PAT-CUP":    ("crypto", set(), True,  "retest", "swing", 3.0, 28, "2y 4H backtest: 69 trades, 28% win at 1:3, IS +0.30R / OOS -0.16R per trade net (tiny sample)"),
 }
 def pat_series(name, d, market):
@@ -245,13 +246,19 @@ BRK_PAT_CONF, BRK_PAT_NOTE = 27, ("2y 4H backtest, crypto neckline/trendline bre
     "1:1.5 IS n=870 44.4% +0.071R, OOS n=1001 43.2% +0.032R (net). Tracked: 1:3 (higher pooled net R)")
 STALE = pd.Timedelta("4h30min")   # only the last closed 4H bar is evaluated
 def _sig(strategy, symbol, market, d, a, e, R, conf, note, why):
-    k = e["k"]; sd = 1 if e["dir"] == "long" else -1; entry = float(e["entry"]); sl = float(e["sl"]); risk = abs(entry-sl)
+    from . import variants as V, strategies as SG
+    k = e["k"]; sd = 1 if e["dir"] == "long" else -1; entry = float(e["entry"]); sl = float(e["sl"]); orig = sl
+    vm = V.MODE.get(strategy)
+    if vm:   # live stop variant (same as research/stop_variants_3r): widened / floored stop, fixed 3R
+        sl, _ = V.levels(entry, V.widen(dict(entry=entry, sl=sl, direction=e["dir"]), float(vm[1:])) if vm.startswith("w") else sl, e["dir"], market); R = V.RR
+        why = why + [f"Live stop: {V.DESC[vm]} (pattern stop {orig:.6g}) · target fixed {R:g}R"]
+    risk = abs(entry-sl)
     ct = d.ct.iloc[k] if "ct" in d else d.t.iloc[k] + pd.Timedelta("4h")
-    return dict(symbol=symbol, market=market, direction=e["dir"], entry=entry, sl=sl, tp=entry+sd*R*risk, rr=R,
+    return dict(symbol=symbol, market=market, direction=e["dir"], entry=entry, sl=sl, tp=entry+sd*R*risk, rr=R, orig_sl=orig, stop_mode=vm,
         htf_top=float(max(e["level"], entry)), htf_bottom=float(min(e["level"], entry)), htf_time=str(d.t.iloc[e["brk"]]),
         tap_time=str(d.t.iloc[k]), confirm_time=str(ct), price_now=entry, in_session=True, confidence=conf, setup_score=None,
-        strategy=strategy, tags=[strategy], experimental=1, status="open", filled_at=str(ct),
-        reasons=[f"{strategy} [EXPERIMENTAL – paper]"] + why + [f"TP1 1:1.5 = {entry+sd*1.5*risk:.6g} · TP2 1:3 = {entry+sd*3*risk:.6g}; tracked target: 1:{R:g}", note])
+        strategy=strategy, tags=[strategy], experimental=0, status="open", filled_at=str(ct),
+        reasons=[f"{strategy} [{SG.label(strategy)}]"] + why + [f"Target: 1:{R:g} = {entry+sd*R*risk:.6g}", note])
 def _fresh(d, k, now):
     ct = d.ct.iloc[k] if "ct" in d else d.t.iloc[k] + pd.Timedelta("4h")
     return k == len(d)-1 and ct <= now and now - ct <= STALE

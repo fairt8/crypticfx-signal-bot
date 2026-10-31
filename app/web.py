@@ -18,7 +18,7 @@ def _stop(): db.release_lease()
 @app.get("/", response_class=HTMLResponse)
 def home(): return (Path(__file__).parent / "dashboard.html").read_text()
 def tier_rows(days, tier):
-    """Signals of one tier (primary|normal|experimental|profitable), with DON20 positions included when the tier covers DON20."""
+    """Signals of one tier (primary|secondary|profitable), with DON20 positions included when the tier covers DON20."""
     from . import alerts, strategies as SG, trades
     rs = [dict(r, strategy_key=SG.eff(r.get("strategy"), r.get("tags"))) for r in db.recent(days)]
     rs = [r for r in rs if SG.active(r["strategy_key"]) and alerts.in_tier(r["strategy_key"], tier)]
@@ -30,17 +30,26 @@ def tier_rows(days, tier):
 def signals(days: int = 30, tier: str = ""):
     if not tier: return db.recent(days)   # unchanged default
     from . import alerts
-    if tier not in alerts.TIERS: return JSONResponse({"error": "tier must be primary|normal|experimental|profitable"}, 400)
+    if tier not in alerts.TIERS: return JSONResponse({"error": "tier must be primary|secondary|profitable"}, 400)
     return tier_rows(days, tier)
 @app.get("/api/alerts")
 def alerts_state():   # read-only (mode can only be changed from Telegram: /alerts or the mini app)
     from . import alerts; return alerts.state()
+def strategies_enabled():
+    """Live on/off per strategy (env flags), for diagnostics."""
+    pat = lambda k: C.ENABLE_PAT and k in C.PAT_ENABLED
+    return {"DON20": True, "MF-REJ": C.ENABLE_MF, "PAT-TRIPLE": pat("PAT-TRIPLE"), "PAT-WEDGE": pat("PAT-WEDGE"),
+            "BRK": C.ENABLE_BRK, "CHK": C.ENABLE_CHK, "FVG-D1": C.ENABLE_D1, "FVG-PLAN": C.ENABLE_FVG_PLAN, "PAT-TRIPLE-C": pat("PAT-TRIPLE-C"),
+            "FVG+TREND": C.ENABLE_FVG_TREND, "FVG": C.ENABLE_FVG_LIVE, "PAT-CUP": pat("PAT-CUP")}
+def tier_map():
+    from . import strategies as SG, variants as V
+    return {k: dict(tier=SG.status(k), label=SG.label(k), short=SG.short(k), stop=V.DESC.get(V.MODE.get(k), "strategy rules")) for k in SG.STATUS}
 @app.get("/api/stats")
 def stats(): return dict(db.stats(), by_strategy=db.by_strategy(), telegram_mode=telegram.MODE["state"], telegram_menu_button=telegram.MENU["state"], telegram_webhook=telegram.webhook_info(), leader=scanner.STATE.get("leader"), db="postgres" if db.PG else "sqlite", last_summary=scanner.STATE.get("last_summary"), last_scan=scanner.STATE.get("last_scan"), counts=scanner.STATE.get("last_counts"),
     sessions=scanner.STATE.get("sessions"), active_ccy=scanner.STATE.get("active_ccy"),
     forex_priority=[r for r in scanner.STATE.get("forex_rank", []) if r.get("priority")],
     strength={k: round(v,3) for k,v in scanner.STATE.get("strength", {}).items()},
-    universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled(), telegram_token_shape=telegram.token_shape(), min_post_score=C.MIN_POST_SCORE, strategies_enabled={"PAT-TRIPLE": C.ENABLE_PAT and "PAT-TRIPLE" in C.PAT_ENABLED, "PAT-WEDGE": C.ENABLE_PAT and "PAT-WEDGE" in C.PAT_ENABLED, "PAT-CUP": C.ENABLE_PAT and "PAT-CUP" in C.PAT_ENABLED, "BRK": C.ENABLE_BRK, "BRK_MARKETS": sorted(C.BRK_MARKETS), "BRK_LEVELS": C.BRK_LEVELS}, mf_strong_pair=scanner.STATE.get("mf_strong_pair"),
+    universe_size=len(scanner.STATE.get("universe", [])), ai=ai.enabled(), telegram=telegram.enabled(), telegram_token_shape=telegram.token_shape(), min_post_score=C.MIN_POST_SCORE, strategies_enabled=strategies_enabled(), tiers=tier_map(), tier_stats={t: db.stats(tier=t) for t in ("primary", "secondary")}, strategies_flags={"BRK": C.ENABLE_BRK, "BRK_MARKETS": sorted(C.BRK_MARKETS), "BRK_LEVELS": C.BRK_LEVELS}, mf_strong_pair=scanner.STATE.get("mf_strong_pair"),
     instance=db.INSTANCE, scheduler_lease=db.kv_get("lease:scheduler"), scan_started=scanner.STATE.get("scan_started"), scan_errors=scanner.STATE.get("errors", [])[-5:], don20=dict(last_run=don20.STATE["last_run"], last_result=don20.STATE["last_result"], errors=don20.STATE["errors"][-5:]))
 @app.get("/api/trades")
 def trades_by_state(state: str = "open", period: str = "all"):
@@ -50,6 +59,9 @@ def trades_by_state(state: str = "open", period: str = "all"):
     rows = trades.by_state(state, period); cl = [r for r in rows if r.get("net_r") is not None]
     return dict(state=state, period=period, count=len(rows), closed_net_r=round(sum(r["net_r"] for r in cl), 2),
                 open_live_net_r=round(sum(r.get("live_net_r") or 0 for r in rows if r["status"] == "open"), 2), rows=rows)
+@app.get("/api/equity")
+def equity(days: int = 30):
+    from .webapp import equity as eq; return eq(max(7, min(days, 90)))
 @app.get("/api/don20/pnl")
 def don20_pnl():
     from . import trades; return trades.don20_pnl()

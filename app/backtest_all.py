@@ -4,14 +4,17 @@ Writes <out>/backtest-all-YYYY-MM-DD.md and .json; sends a short Telegram summar
 
 Strategies and how they are replayed (same functions the live scan calls):
   FVG / FVG-D1 / FVG-PLAN / FVG+TREND  strategy.analyze on 4H + 15m (Binance), live gate setup_score >= MIN_POST_SCORE (70);
-        FVG-D1 = daily_bias agrees, FVG-PLAN = strategy.plan_variant, FVG+TREND = EMA50/200 aligned. Outcome: outcomes.simulate
-        on the next 400 15m bars (limit entry, 48h expiry, 50%-at-TP1 rule for PTP_STRATS).
+        FVG-D1 = daily_bias agrees, FVG-PLAN = strategy.plan_variant with the live 1.5× stop + 3R, FVG+TREND = EMA50/200 aligned with
+        the live 1h-candle stop set at the fill + 3R (app/variants.py). Outcome: outcomes.simulate on the next 400 15m bars
+        (limit entry, 48h expiry, 50%-at-TP1 rule for PTP_STRATS).
   CHK         strategy.analyze_chk on every closed 1H bar (market entry), outcomes.simulate on 15m.
   DON20       don20.signal on daily candles, entry at the signal close, 3xATR chandelier trail, exit at stop (or open if gapped);
               one position per coin; still-open positions are marked to the last close.
   MF-REJ      strategy.analyze_mf on 1H for every pair/session in MF_PAIRS (incl. GBPCNH and synthetic XAUAUD) with its 1y 4H history;
               outcome on 1H bars at the next-zone TP. (The dynamic 'strong pair' is not replayed.)
-  PAT-TRIPLE (forex) / PAT-WEDGE, PAT-CUP, BRK (crypto)  patterns_live.pat_series / brk_series on 4H, outcome on 4H at the tracked R.
+  PAT-TRIPLE (forex) / PAT-WEDGE, PAT-TRIPLE-C, PAT-CUP, BRK (crypto)  patterns_live.pat_series / brk_series on 4H, outcome on 4H;
+              crypto PAT/BRK use the live stop variants (PAT-WEDGE 1.5×, PAT-TRIPLE-C 2×, 0.3% floor) and a fixed 3R target.
+  Not replayed here (research only, never live): MF-REJ crypto, DON28 (research/stop_variants_3r).
 Costs (round trip, in R = cost / stop distance): crypto 0.10%, forex majors 0.02%, crosses + CNH 0.03%, metals 0.05%.
 Seasons: crypto = BTC daily vs its 200D SMA and the SMA's 20-day slope (bull: above & rising, bear: below & falling, else range);
 forex = the same rule on each pair's own daily closes. A trade gets the season of the day before its entry."""
@@ -19,7 +22,7 @@ import argparse, json, os, sys, time, resource
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np, pandas as pd
-from . import config as C, strategy, outcomes, strategies as SG
+from . import config as C, strategy, outcomes, strategies as SG, variants as V
 AGG = {"o": "first", "h": "max", "l": "min", "c": "last", "v": "sum"}
 CRYPTO_COST = 0.001
 def fx_cost(sym): return 0.0005 if sym.startswith("XA") else (0.0002 if "USD" in sym and "CNH" not in sym else 0.0003)
@@ -90,13 +93,15 @@ def run_crypto(a):
         seen.add(sig["confirm_time"]); fut = m.iloc[j+1:j+401]
         variants = [("FVG", sig)]
         if strategy.daily_bias(d1[d1.ct <= now], now) == sig["direction"]: variants.append(("FVG-D1", dict(sig, strategy="FVG-D1")))
-        if any("EMA50/EMA200 trend aligned" in w for w in sig["reasons"]): variants.append(("FVG+TREND", dict(sig, strategy="FVG+TREND")))
+        if any("EMA50/EMA200 trend aligned" in w for w in sig["reasons"]):   # live variant: 1h-candle stop set at the fill, 3R
+            variants.append(("FVG+TREND", dict(sig, strategy="FVG+TREND", orig_sl=sig["sl"], rr=V.RR)))
         pv = strategy.plan_variant(sig)
-        if pv: variants.append(("FVG-PLAN", pv))
+        if pv: variants.append(("FVG-PLAN", V.apply("FVG-PLAN", pv)))   # live variant: 1.5× swing stop, 3R
         for nm, s in variants:
-            st, _, _, r = outcomes.simulate(dict(s, status="pending", filled_at=None), fut)
+            info = {}; hist = m.iloc[max(0, j-200):j+401] if nm == "FVG+TREND" else fut   # c60 needs the 1h candles before the fill
+            st, _, _, r = outcomes.simulate(dict(s, status="pending", filled_at=None), hist, info=info)
             if st in ("pending", "expired"): continue   # never filled -> no trade
-            rows.append(rec(nm, sym, "crypto", now, s["direction"], s["entry"], s["sl"], r, CRYPTO_COST, st))
+            rows.append(rec(nm, sym, "crypto", now, s["direction"], s["entry"], info.get("sl", s["sl"]), r, CRYPTO_COST, st))
     # CHK on 1H
     h1 = resample(m[["t", "o", "h", "l", "c", "v"]], "1h"); h1 = h1[h1.ct <= m.ct.iloc[-1]].reset_index(drop=True); ct15 = m.ct.values
     for i in range(225, len(h1) - 1):
@@ -107,7 +112,7 @@ def run_crypto(a):
         if not sig: continue
         s0 = np.searchsorted(ct15, now.to_datetime64(), side="right"); st, _, _, r = outcomes.simulate(sig, m.iloc[s0:s0+400])
         rows.append(rec("CHK", sym, "crypto", now, sig["direction"], sig["entry"], sig["sl"], r if st in outcomes_closed() else mtm(sig, m.iloc[s0:s0+400]), CRYPTO_COST, st))
-    # PAT-WEDGE / PAT-CUP / BRK on 4H (crypto)
+    # PAT-WEDGE / PAT-TRIPLE-C / PAT-CUP / BRK on 4H (crypto)
     from . import patterns_live as P
     todo = [("BRK",) + P.brk_series(h4, "crypto", levels=C.BRK_LEVELS)] + [(nm,) + P.pat_series(nm, h4, "crypto") for nm, v in P.PAT.items() if v[0] == "crypto"]
     for nm, dd, aa, E in todo:
@@ -124,7 +129,10 @@ def mtm(sig, fut):
     if not len(fut): return 0.0
     sd = 1 if sig["direction"] == "long" else -1; return sd*(fut.c.iloc[-1] - sig["entry"])/abs(sig["entry"] - sig["sl"])
 def pat_outcome(nm, sym, market, dd, e, R, cost, ct):
-    entry, sl = float(e["entry"]), float(e["sl"]); sd = 1 if e["dir"] == "long" else -1; risk = abs(entry - sl)
+    entry, sl = float(e["entry"]), float(e["sl"]); sd = 1 if e["dir"] == "long" else -1
+    if V.MODE.get(nm):   # live stop variant (PAT-WEDGE 1.5×, PAT-TRIPLE-C 2×, BRK current; crypto 0.3% floor), fixed 3R
+        vm = V.MODE[nm]; sl, _ = V.levels(entry, V.widen(dict(entry=entry, sl=sl, direction=e["dir"]), float(vm[1:])) if vm.startswith("w") else sl, e["dir"], market); R = V.RR
+    risk = abs(entry - sl)
     sig = dict(direction=e["dir"], entry=entry, sl=sl, tp=entry + sd*R*risk, rr=R, confirm_time=str(ct), status="open", filled_at=str(ct), strategy=nm)
     fut = dd.iloc[e["k"]+1:e["k"]+181]; st, _, _, r = outcomes.simulate(sig, fut)
     return rec(nm, sym, market, ct, e["dir"], entry, sl, r if st in outcomes_closed() else mtm(sig, fut), cost, st)

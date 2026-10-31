@@ -85,7 +85,7 @@ def analyze(symbol, market, h4, m5, extra=None):
         in_session=in_major_session(conf_t.to_pydatetime()), confidence=calibrate(sc, market), setup_score=sc,
         strategy="FVG", experimental=0, swing_sl=swing, fvg3_sl=float(three.l.min() if g["dir"]=="long" else three.h.max()),
         tap_to_confirm_bars=int(xi-ti),
-        tags=["FVG"] + (["FVG+TREND"] if C.ENABLE_FVG_TREND and market in C.EXPERIMENTAL_MARKETS and any("EMA50/EMA200 trend aligned" in w for w in why) else []),
+        tags=["FVG"],   # FVG+TREND is its own row now (scanner.fvg_trend)
         reasons=why + [f"Raw setup score {sc}/95 -> calibrated win probability {calibrate(sc, market)}% (backtest)"])
 
 def score(g, h4, mupto, m5, market, conf_t, extra):
@@ -129,7 +129,7 @@ def calibrate(raw, market):
     return int(round(100/(1+math.exp(-(a+b*raw)))))
 
 
-# ---------------- EXPERIMENTAL: Zerodha Varsity Grand Checklist (backtest-report-v2.md, "CHK") ----------------
+# ---------------- 🔷 SECONDARY: Zerodha Varsity Grand Checklist (backtest-report-v2.md, "CHK") ----------------
 def analyze_chk(symbol, market, h4, h1, max_age_min=60, sr_atr=0.5):
     """Evaluate the last closed 1H candle. Same rules as app/backtest2.chk_trades:
     1 candlestick pattern, 2 pattern low/high within 0.5 ATR of a confirmed pivot S/R, 3 volume > 20-bar avg (crypto),
@@ -188,7 +188,7 @@ def watch_info(symbol, market, h4, ltf):
                 price=px, dist_pct=round(100*dist, 3), tapped=tapped)
 
 
-# ---------------- EXPERIMENTAL: creator's PDF plan variant ("FVG-PLAN", backtest3) ----------------
+# ---------------- 🔷 SECONDARY: creator's PDF plan variant ("FVG-PLAN"; live 1.5× stop + 3R in variants.py) ----------------
 PLAN_MAX_TAP_TO_CONFIRM = 16   # "price should quickly shoot off" -> 15m FVG within 16 bars (4h) of the tap; chosen in-sample
 def plan_variant(sig):
     """Same setup as FVG, but stop at the swing low/high of the leg (creator plan) and the quick-reaction rule."""
@@ -198,11 +198,11 @@ def plan_variant(sig):
     if risk <= 0 or risk/e*100 < (C.MIN_STOP_PCT_CRYPTO if sig["market"] == "crypto" else C.MIN_STOP_PCT_FOREX): return None
     p = dict(sig); p.update(strategy="FVG-PLAN", tags=["FVG-PLAN"], experimental=0, sl=float(sl),
         tp=float(e + C.RR*risk if d == "long" else e - C.RR*risk),
-        reasons=sig["reasons"] + [f"PLAN: stop at swing {'low' if d=='long' else 'high'} of the leg, 15m FVG {sig['tap_to_confirm_bars']} bars after tap. NORMAL strategy (backtest crypto −0.08R IS / +0.00R OOS net)"])
+        reasons=sig["reasons"] + [f"PLAN: stop at swing {'low' if d=='long' else 'high'} of the leg, 15m FVG {sig['tap_to_confirm_bars']} bars after tap. 🔷 SECONDARY: live stop = 1.5× this swing stop, 3R (app/variants.py)"])
     return p
 
 
-# ---------------- EXPERIMENTAL: FVG-D1 tag (daily structure bias "B", backtest bt_d1) ----------------
+# ---------------- 🔷 SECONDARY: FVG-D1 (daily structure bias "B", backtest bt_d1) ----------------
 def daily_bias(d1, now=None, k=2):
     """Daily market structure from confirmed pivots (k=2) on completed daily candles:
     last two swing highs AND lows rising -> 'long'; both falling -> 'short'; else ''."""
@@ -218,7 +218,7 @@ def daily_bias(d1, now=None, k=2):
     return ""
 
 
-# ---------------- EXPERIMENTAL: Market Fluidity zone rejection "MF-REJ" (backtest-report-mf.md, app/backtest_mf.py) ----------------
+# ---------------- ⭐ PRIMARY (forex): Market Fluidity zone rejection "MF-REJ" (backtest-report-mf.md, app/backtest_mf.py) ----------------
 MF_SESSIONS_UTC = {"Asian": (0, 7), "London": (7, 12), "NY": (12, 17)}   # UTC hours [start, end)
 # User's handwritten sheet (the 5 designated pairs, unchanged) + pairs added by the one-home-currency rule:
 # a pair signals in a session only when exactly ONE of its currencies is "at home" there
@@ -314,7 +314,7 @@ def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=Non
     if rr < 0.5: return None
     dr = "long" if d == 1 else "short"
     lbl = "⭐ Top5" if symbol in MF_DESIGNATED else "🕐 Session pair" if sess in MF_PAIRS.get(symbol, []) else "⚡ Strong pair"
-    why = [f"FOREX MF-REJ [EXPERIMENTAL – paper test] · {lbl}",
+    why = [f"FOREX MF-REJ [⭐ PRIMARY] · {lbl}",
            (f"Session: {sess} – strong pair of {sess} (strongest vs weakest currency, 24h strength)" if sess not in MF_PAIRS.get(symbol, [])
             else f"Session: {sess} ({symbol} allowed in {', '.join(MF_PAIRS[symbol])})"),
            f"Daily and 4H body structure both {'up (HH+HL)' if d == 1 else 'down (LH+LL)'}",
@@ -324,4 +324,4 @@ def analyze_mf(symbol, h4, h1, max_age_min=90, today_count=0, strong_session=Non
     return dict(symbol=symbol, market="forex", direction=dr, entry=entry, sl=sl, tp=float(tz), rr=round(rr, 2),
         htf_top=float(zhi), htf_bottom=float(zlo), htf_time=str(x.t.iloc[i]), tap_time=str(x.t.iloc[i]), confirm_time=str(ct),
         price_now=entry, in_session=True, confidence=MF_CONFIDENCE, setup_score=None, session=sess,
-        strategy="MF-REJ", tags=["MF-REJ"], experimental=1, status="open", filled_at=str(ct), reasons=why)
+        strategy="MF-REJ", tags=["MF-REJ"], experimental=0, status="open", filled_at=str(ct), reasons=why)

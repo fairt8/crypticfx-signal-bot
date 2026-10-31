@@ -8,40 +8,47 @@ Profitable strategy (recomputed every scan and cached in the DB, so the set can 
   * otherwise 'not enough data' (not profitable for alerting).
 Retired strategies are never profitable for alerting.
 
-Alert mode (DB setting 'setting:alert_mode' in the kv table, shared by Render and GitHub Actions):
-  all | primary | profitable | primary_or_profitable. Non-matching signals are still saved and tracked, just not pushed."""
+Alert mode (DB setting 'setting:alert_mode' in the kv table, shared by the VM, Render and GitHub Actions):
+  primary            ⭐ PRIMARY signals only
+  primary_secondary  ⭐ PRIMARY + 🔷 SECONDARY (default)
+There are no other live tiers (user 2026-10-31: "No more normal signals only primary and secondary").
+Retired strategies never create live signals. 💰 'profitable' is kept as an info badge / filter only."""
 import json, os, time
 from datetime import datetime, timezone, timedelta
 from . import db, strategies as SG
 
 WINDOW = int(os.getenv("PROFIT_WINDOW_DAYS", "30"))
 MIN_N = int(os.getenv("PROFIT_MIN_TRADES", "10"))
-MODES = ("all", "primary", "profitable", "primary_or_profitable")
-ALIASES = {"both": "primary_or_profitable", "primary+profitable": "primary_or_profitable", "or": "primary_or_profitable",
-           "profit": "profitable", "prim": "primary", "everything": "all"}
-MODE_LABEL = {"all": "🔔 All signals", "primary": "⭐ PRIMARY only", "profitable": "💰 Profitable strategies only",
-              "primary_or_profitable": "⭐ PRIMARY + 💰 profitable"}
-TIERS = ("primary", "normal", "experimental", "profitable")
-DEFAULT_MODE = "primary_or_profitable"   # ⭐ PRIMARY (DON20, CHK) always + 💰 currently profitable strategies
+MODES = ("primary", "primary_secondary")
+ALIASES = {"prim": "primary", "primary_only": "primary", "only_primary": "primary",
+           "both": "primary_secondary", "secondary": "primary_secondary", "all": "primary_secondary", "everything": "primary_secondary",
+           "primary+secondary": "primary_secondary", "primary_and_secondary": "primary_secondary", "ps": "primary_secondary",
+           # old modes (before 2026-10-31) -> both live tiers
+           "profitable": "primary_secondary", "profit": "primary_secondary", "primary_or_profitable": "primary_secondary",
+           "primary+profitable": "primary_secondary", "or": "primary_secondary"}
+MODE_LABEL = {"primary": "⭐ PRIMARY only", "primary_secondary": "⭐ PRIMARY + 🔷 SECONDARY"}
+TIERS = ("primary", "secondary", "profitable")   # /signals + API filters (profitable = 💰 info filter)
+DEFAULT_MODE = "primary_secondary"
 KEY_MODE, KEY_PROFIT, KEY_MUTED = "setting:alert_mode", "profitable:last", "alerts:muted"
 
 def norm_mode(m):
-    m = (m or "").strip().lower(); m = ALIASES.get(m, m); return m if m in MODES else None
+    m = (m or "").strip().lower().replace(" ", "_"); m = ALIASES.get(m, m); return m if m in MODES else None
 def get_mode():
     try: return norm_mode(db.kv_get(KEY_MODE)) or DEFAULT_MODE
     except Exception: return DEFAULT_MODE
 def set_mode(m):
     m = norm_mode(m)
-    if not m: raise ValueError("mode must be one of: all, primary, profitable, both")
+    if not m: raise ValueError("mode must be: primary (⭐ only) or both (⭐ PRIMARY + 🔷 SECONDARY)")
     db.kv_set(KEY_MODE, m); return m
 
-MIGRATIONS = [("migration:2026-10-21-alert-mode-profitable", "profitable"),
-              ("migration:2026-10-27-alert-mode-primary-or-profitable", "primary_or_profitable")]   # user-approved one-time switches (later /alerts changes win)
+MIGRATION_KEY = "migration:2026-10-31-two-tiers"
 def apply_migrations():
-    for key, m in MIGRATIONS:
-        try:
-            if not db.kv_get(key): set_mode(m); db.kv_set(key, datetime.now(timezone.utc).isoformat())
-        except Exception: pass
+    """One-time: store the old mode in the new two-tier form (primary stays primary, everything else -> primary_secondary)."""
+    try:
+        if not db.kv_get(MIGRATION_KEY):
+            old = (db.kv_get(KEY_MODE) or "").strip().lower()
+            set_mode("primary" if old == "primary" else "primary_secondary"); db.kv_set(MIGRATION_KEY, datetime.now(timezone.utc).isoformat())
+    except Exception: pass
 def compute():
     """Per active strategy: live window stats, backtest fallback, verdict."""
     from . import trades, webapp
@@ -89,16 +96,14 @@ def badge(k):
     return "💰" if v.get("profitable") else ""
 
 def in_tier(k, tier):
-    if not tier: return True
+    if not tier: return SG.status(k) in SG.TIERS
     if tier == "profitable": return k in profitable_set()
     return SG.status(k) == tier
 
 def should_push(k, mode=None):
     mode = mode or get_mode(); st = SG.status(k)
-    if mode == "all": return True
     if mode == "primary": return st == "primary"
-    if mode == "profitable": return k in profitable_set()
-    return st == "primary" or k in profitable_set()
+    return st in SG.TIERS   # primary_secondary
 
 def mute(rows):
     """Record signals that were saved but not pushed (for the summary)."""
@@ -117,7 +122,6 @@ def muted_since(hours):
 def filter_push(rows, key=lambda r: SG.eff(r.get("strategy"), r.get("tags"))):
     """Split rows into (push, muted) by the current alert mode; muted ones are recorded."""
     mode = get_mode()
-    if mode == "all": return list(rows), []
     push = [r for r in rows if should_push(key(r), mode)]; muted = [r for r in rows if r not in push]
     if muted: mute(muted)
     return push, muted

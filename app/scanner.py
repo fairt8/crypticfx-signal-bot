@@ -1,5 +1,5 @@
 import time, logging, threading
-from . import config as C, binance, forex, strategy, db, telegram, outcomes
+from . import config as C, binance, forex, strategy, db, telegram, outcomes, variants as V
 log = logging.getLogger("scanner")
 STATE = dict(universe=[], universe_at=0, last_scan=None, forex_rank=[], strength={}, active_ccy=[], sessions=[], errors=[])
 
@@ -9,7 +9,14 @@ def crypto_universe():
     return STATE["universe"]
 
 _PAT_DONE = set()
-PAT_STRATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-CUP", "BRK")
+PAT_STRATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-TRIPLE-C", "PAT-CUP", "BRK")
+FVG_FAMILY = ("FVG", "FVG-D1", "FVG-PLAN", "FVG+TREND")
+def fvg_trend(sig, m5):
+    """FVG+TREND row: same setup/entry as FVG; stop beyond the last closed 1h candle (provisional now, final at the fill), 3R."""
+    c = V.c60_stop(m5, m5.t.iloc[-1], sig["direction"], sig["entry"])
+    sl, tp = V.levels(sig["entry"], c if c is not None else sig["sl"], sig["direction"], sig["market"])
+    return dict(sig, strategy="FVG+TREND", tags=["FVG+TREND"], experimental=0, sl=sl, tp=tp, rr=V.RR, orig_sl=sig["sl"], stop_mode="c60",
+                reasons=["FVG+TREND [🔷 SECONDARY]"] + sig["reasons"][1:] + ["Stop: beyond the last closed 1h candle at the fill (−/+0.1 ATR), min 0.3%; SL/TP are re-set when the limit fills; target 3R"])
 def patterns_for(data, market, found, budget_end):
     """PAT-*/BRK on the already-fetched closed 4H candles (no extra downloads). Max PAT_MAX_PER_SCAN per strategy."""
     if not (C.ENABLE_PAT or C.ENABLE_BRK): return
@@ -33,9 +40,12 @@ def patterns_for(data, market, found, budget_end):
     STATE.setdefault("pat_counts", {})[market] = {k: len(L) for k, L in got.items()}
 
 def qualifies(sig):
-    """Live filter (backtest v3): only crypto FVG setups (plus the FVG-PLAN row of the same setup) with setup_score >= MIN_POST_SCORE."""
-    if sig.get("strategy") in ("MF-REJ", "CHK") or sig.get("strategy") in PAT_STRATS: return True   # CHK: own checklist rules, 🧪 EXPERIMENTAL (5d72be1 had blocked it)   # own rules; MIN_POST_SCORE does not apply   # own forex strategy with its own filters (session, bias, range, 2/day)
-    return sig.get("market") == "crypto" and sig.get("strategy") in ("FVG", "FVG-D1", "FVG-PLAN") and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
+    """Live filter: crypto FVG-family setups with setup_score >= MIN_POST_SCORE; MF-REJ, CHK, PAT-*/BRK use their own rules.
+    Retired strategies (strategies.STATUS) never get new rows."""
+    from . import strategies as SG
+    if not SG.active(SG.eff(sig.get("strategy"), sig.get("tags"))): return False
+    if sig.get("strategy") in ("MF-REJ", "CHK") or sig.get("strategy") in PAT_STRATS: return True
+    return sig.get("market") == "crypto" and sig.get("strategy") in FVG_FAMILY and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE
 
 def scan(crypto=True, fx=True, post=True, gen=None):
     t0 = time.time(); found = []; cache = {}; watch = []
@@ -52,13 +62,15 @@ def scan(crypto=True, fx=True, post=True, gen=None):
                 sig = strategy.analyze(s, "crypto", h4, m5)
                 if sig and C.ENABLE_D1 and "crypto" in C.EXPERIMENTAL_MARKETS and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE:
                     b = strategy.daily_bias(binance.daily(s))   # only fetched when a setup exists (cached 6h)
-                    if b == sig["direction"]:   # FVG-D1 (NORMAL): same setup/levels as FVG, only when the daily structure agrees
+                    if b == sig["direction"]:   # FVG-D1 (🔷 SECONDARY): same setup/levels as FVG, only when the daily structure agrees
                         found.append(dict(sig, strategy="FVG-D1", tags=["FVG-D1"], experimental=0,
-                                          reasons=["FVG-D1 [NORMAL]"] + sig["reasons"][1:] + [f"Daily structure bias {b} agrees (FVG-D1)"]))
+                                          reasons=["FVG-D1 [🔷 SECONDARY]"] + sig["reasons"][1:] + [f"Daily structure bias {b} agrees (FVG-D1)"]))
+                if sig and C.ENABLE_FVG_TREND and (sig.get("setup_score") or 0) >= C.MIN_POST_SCORE and any("EMA50/EMA200 trend aligned" in w for w in sig["reasons"]):
+                    found.append(fvg_trend(sig, m5))   # 🔷 SECONDARY: 1h-candle stop (final at fill), 3R
                 if sig and C.ENABLE_FVG_LIVE: found.append(sig)   # plain FVG (live): RETIRED
                 if sig and C.ENABLE_FVG_PLAN and "crypto" in C.EXPERIMENTAL_MARKETS:
                     pv = strategy.plan_variant(sig)
-                    if pv: found.append(pv)
+                    if pv: found.append(V.apply("FVG-PLAN", pv))   # 🔷 SECONDARY: 1.5× swing stop, 3R
                 w = strategy.watch_info(s, "crypto", h4, m5)
                 if w: watch.append(w)
                 if C.ENABLE_CHK and "crypto" in C.EXPERIMENTAL_MARKETS:
@@ -131,12 +143,12 @@ def scan(crypto=True, fx=True, post=True, gen=None):
         if i: new.append(db.get(i))
     if post:   # one Telegram post per setup: FVG + FVG-PLAN rows from the same setup are posted together
         groups = {}
-        for s in new: groups.setdefault((s["symbol"], s["confirm_time"], s["strategy"] in ("FVG", "FVG-D1", "FVG-PLAN")), []).append(s)
+        for s in new: groups.setdefault((s["symbol"], s["confirm_time"], s["strategy"] in FVG_FAMILY), []).append(s)
         for g in groups.values():
             try: telegram.post_group(g)
             except Exception as e: STATE["errors"].append(f"telegram: {e}")
     STATE["watch"] = watch
-    try: STATE["outcomes"] = outcomes.update_all(cache)
+    try: STATE["outcomes"] = outcomes.update_all(cache, post=post)
     except Exception as e: STATE["errors"].append(f"outcomes: {e}")
     if C.ENABLE_DON20:
         try:

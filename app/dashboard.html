@@ -1,101 +1,99 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FVG Signal Bot</title><style>:root{--bg:#0b0f17;--panel:#131a26;--panel2:#1a2333;--line:#243046;--txt:#e7ecf3;--mut:#8b98ad;--grn:#22c55e;--red:#ef4444;--amb:#f59e0b;--blu:#3b82f6}
-*{box-sizing:border-box}body{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(1200px 600px at 10% -10%,#16213a,var(--bg));color:var(--txt);margin:0;padding:20px;line-height:1.45}
-h1{font-size:22px;margin:0 0 6px;font-weight:700}h1 .muted{display:block;font-weight:400;margin-top:4px}h3{margin:22px 0 8px;font-size:16px}
-.muted{color:var(--mut);font-size:13px}#meta{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin:14px 0}
-.card{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:0 4px 18px #0005}
-.card b{display:block;font-size:24px;margin-top:4px}.pos{color:var(--grn)!important}.neg{color:var(--red)!important}
-.tw{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:8px 0 16px}
-table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
-th{color:var(--mut);position:sticky;top:0;background:var(--panel2);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.04em}
-tbody tr:hover{background:#1c2638}td:last-child{white-space:normal}
-.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-weight:700;font-size:11px}
-.badge.long{background:#22c55e22;color:var(--grn);border:1px solid #22c55e66}.badge.short{background:#ef444422;color:var(--red);border:1px solid #ef444466}
-.long{color:var(--grn)}.short{color:var(--red)}
-.pill{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#ffffff12;color:var(--mut)}
-.prim{background:#a855f726;color:#d8b4fe;border:1px solid #a855f766;padding:2px 7px;border-radius:6px;font-size:11px;font-weight:700}.pill.be{background:#22c55e14;color:#86efac}.pill.tp{background:#22c55e26;color:var(--grn)}.pill.sl{background:#ef444426;color:var(--red)}.pill.open{background:#f59e0b26;color:var(--amb)}.pill.pending{background:#3b82f626;color:#93c5fd}
-.flag{background:#f59e0b22;color:var(--amb);padding:2px 6px;border-radius:5px;font-size:11px}
-.conf{display:inline-block;width:40px;text-align:right}.cbar{display:inline-block;width:60px;height:6px;background:#ffffff14;border-radius:4px;margin-left:6px;vertical-align:middle;overflow:hidden}.cbar i{display:block;height:100%;background:linear-gradient(90deg,var(--amb),var(--grn))}
-.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0;color:var(--mut);font-size:13px}
-button,select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}button{background:var(--blu);border:0;cursor:pointer;font-weight:600}button:hover{filter:brightness(1.1)}
-details{font-size:12px;color:var(--mut)}summary{cursor:pointer}
-@media(max-width:640px){body{padding:12px}h1{font-size:18px}.card b{font-size:20px}th,td{padding:7px 8px}}
-.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.tab{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}.tab.on{background:var(--blu);border-color:var(--blu)}
-input{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;width:130px}
-</style></head><body>
-<h1>FVG Signal Bot <span class="muted">4H FVG → 15m FVG confirmation · 1:3 RR · live: crypto FVG with setup score ≥ 70 only (older rows may include forex/CHK)</span></h1>
-<div class="muted" id="meta"></div>
-<div class="cards" id="cards"></div>
-<div class="muted" id="alertmode" style="margin:-4px 0 10px"></div>
-<div class="tw"><table style="margin:6px 0 14px;max-width:900px"><thead><tr><th>Strategy (last 60d, live)</th><th>Signals</th><th>Closed</th><th>Open/pending</th><th>Win %</th><th>Gross R</th><th>Net R (after costs)</th><th>Net R/trade</th></tr></thead><tbody id="strats"></tbody></table></div>
-<h3>⭐ DON20 open positions <span class="prim">PRIMARY</span></h3><div class="tw"><table style="max-width:900px"><thead><tr><th>#</th><th>Coin</th><th>Side</th><th>Opened</th><th>Entry</th><th>Initial stop</th><th>Trailing stop</th><th>Status</th><th>R (net)</th></tr></thead><tbody id="don20"></tbody></table></div>
-<h3>📊 Trades &amp; PnL</h3>
-<div class="tabs"><button class="tab on" data-s="open">📈 Currently trading</button><button class="tab" data-s="pending">⏳ Pending</button><button class="tab" data-s="new">🆕 New signals</button><button class="tab" data-s="closed">🏁 Closed</button><button class="tab" data-s="retired">🗄 Retired</button>
- <span class="filters" style="margin:0 0 0 8px">Period <select id="tp"><option value="day">day</option><option value="week">week</option><option value="month">month</option><option value="all" selected>all</option></select>
- Token <input id="tsym" placeholder="e.g. BTCUSDT"><button onclick="lookup()">Look up</button></span></div>
-<div class="cards" id="tcards"></div>
-<div class="tw"><table><thead id="thead"></thead><tbody id="trows"><tr><td class="muted">Loading…</td></tr></tbody></table></div>
-<p class="muted">Labels: ⭐ PRIMARY · ✅ NORMAL · 🧪 EXPERIMENTAL · 🗄 RETIRED (no new signals; history kept). Pending = signalled, limit entry not hit yet (expires if unfilled). Live PnL uses the latest price (60s cache; forex via Yahoo, XAUAUD = XAUUSD/AUDUSD). Net = after the same fees as the stats.</p>
-<div class="filters">Tier <select id="tier"><option value="">all tiers</option><option value="primary">⭐ primary</option><option value="normal">✅ normal</option><option value="experimental">🧪 experimental</option><option value="profitable">💰 profitable</option></select> Strategy <select id="sg"><option value="">active strategies</option><option value="CHK">⭐ CHK</option><option value="FVG-D1">✅ FVG-D1</option><option value="FVG-PLAN">✅ FVG-PLAN</option><option value="MF-REJ">🧪 FOREX MF-REJ</option><option value="BRK">🧪 BRK</option><option value="PAT-TRIPLE">🧪 PAT-TRIPLE</option><option value="__retired">🗄 retired strategies</option><option value="__all">everything</option></select>
- Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select>
- Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>be</option><option>expired</option><option>retired</option><option>cancelled</option></select>
- <button onclick="scan()">Scan now</button></div>
-<div class="tw"><table><thead><tr><th>#</th><th>Time</th><th>Strategy</th><th>Symbol</th><th>Side</th><th>Win prob.</th><th>Entry</th><th>Stop</th><th>TP1 (1:1.5)</th><th>TP2 (1:3)</th><th>Status</th><th>Why</th></tr></thead><tbody id="rows"></tbody></table></div>
-<p class="muted">Educational tool, not financial advice. "Win prob." is calibrated on a 3-month backtest (≈25% average; break-even at 1:3 is 25% before fees). See backtest-report.md.</p>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark">
+<title>CrypticFx · Signals</title><style>
+:root{--bg:var(--tg-theme-bg-color,#0b0f17);--bg2:var(--tg-theme-secondary-bg-color,#121826);--card:color-mix(in srgb,var(--bg2) 88%,var(--tx) 4%);--tx:var(--tg-theme-text-color,#e9edf5);--hint:var(--tg-theme-hint-color,#8590a6);
+--acc:var(--tg-theme-button-color,#4f8cff);--atx:var(--tg-theme-button-text-color,#fff);--ln:rgba(127,140,170,.16);--g:#22c55e;--r:#f43f5e;--gold:#f5c542;--gold2:#22c55e;--blue:#4f8cff;--silver:#c7d0de;--rad:18px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{background:var(--bg)}
+body{margin:0;color:var(--tx);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,Segoe UI,Roboto,sans-serif;padding-bottom:30px;-webkit-font-smoothing:antialiased}
+header{position:sticky;top:0;z-index:5;padding:14px 16px 10px;background:linear-gradient(var(--bg) 70%,transparent);backdrop-filter:blur(8px)}
+.brand{display:flex;align-items:center;gap:10px}.logo{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,var(--gold),#ff8a3d);box-shadow:0 4px 14px rgba(245,197,66,.25)}
+h1{font-size:19px;margin:0;letter-spacing:-.2px}.muted{color:var(--hint);font-size:12.5px}h2{font-size:15px;margin:22px 4px 10px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}h2 .muted{font-weight:400}
+main{padding:0 12px}.sec{display:none}.sec.on{display:block;animation:in .28s cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.card{background:var(--bg2);border:1px solid var(--ln);border-radius:var(--rad);padding:14px;margin:10px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid .card{margin:0}
+.hero{position:relative;overflow:hidden;background:radial-gradient(120% 140% at 0% 0%,rgba(79,140,255,.28),transparent 60%),radial-gradient(120% 140% at 100% 0%,rgba(245,197,66,.18),transparent 55%),var(--bg2)}
+.k{font-size:12px;color:var(--hint);text-transform:uppercase;letter-spacing:.6px}.v{font-size:24px;font-weight:750;letter-spacing:-.4px;margin-top:2px}.v.big{font-size:32px}
+.pos{color:var(--g)}.neg{color:var(--r)}.long{color:var(--g)}.short{color:var(--r)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;letter-spacing:.5px;padding:3px 8px;border-radius:999px;text-transform:uppercase;white-space:nowrap}
+.b-primary{color:#1b1300;background:linear-gradient(135deg,var(--gold),#ffe08a 45%,var(--gold2));box-shadow:0 2px 10px rgba(245,197,66,.25)}
+.b-secondary{color:#0b1530;background:linear-gradient(135deg,#8fb4ff,var(--silver) 60%,#e8edf5);box-shadow:0 2px 10px rgba(79,140,255,.25)}
+.b-retired{color:var(--hint);background:rgba(127,140,170,.16)}.pill{font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(127,140,170,.16);color:var(--hint);font-weight:600}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 10px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--ln);border-radius:999px;padding:7px 14px;background:var(--bg2);color:var(--tx);font-size:13.5px;font-weight:600;transition:all .18s}
+.chip.on{background:var(--acc);color:var(--atx);border-color:transparent;box-shadow:0 4px 14px color-mix(in srgb,var(--acc) 35%,transparent)}
+.sig{background:var(--bg2);border:1px solid var(--ln);border-radius:var(--rad);padding:13px 14px;margin:10px 0;position:relative;overflow:hidden}
+.sig:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}.sig.t-primary:before{background:linear-gradient(var(--gold),var(--gold2))}.sig.t-secondary:before{background:linear-gradient(var(--blue),var(--silver))}.sig.t-retired:before{background:var(--hint)}
+.sig .top{display:flex;justify-content:space-between;align-items:center;gap:8px}.sym{font-weight:800;font-size:16px;letter-spacing:-.2px}.dir{font-size:12px;font-weight:800;margin-left:6px}
+.lv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:11px 0 8px}.lv div{background:rgba(127,140,170,.08);border-radius:11px;padding:6px 8px}.lv span{display:block;font-size:10.5px;color:var(--hint);text-transform:uppercase;letter-spacing:.5px}.lv b{font-size:13px;font-variant-numeric:tabular-nums;word-break:break-all}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;color:var(--hint)}.res{font-weight:800;font-size:15px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln)}.row:last-child{border-bottom:0}
+.bar{height:6px;border-radius:9px;background:rgba(127,140,170,.16);overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;border-radius:9px}
+nav{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));display:flex;background:color-mix(in srgb,var(--bg2) 86%,transparent);backdrop-filter:blur(14px);border:1px solid var(--ln);border-radius:22px;padding:6px;z-index:9;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+nav button{flex:1;border:0;background:none;color:var(--hint);font-size:10.5px;font-weight:600;padding:6px 0;border-radius:16px;transition:all .2s}nav button span{display:block;font-size:19px;line-height:1.2}nav button.on{color:var(--tx);background:rgba(127,140,170,.14)}
+input{width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--ln);background:var(--bg2);color:var(--tx);font-size:16px;outline:none}input:focus{border-color:var(--acc)}
+.btn{border:0;border-radius:14px;padding:12px 18px;background:var(--acc);color:var(--atx);font-weight:700}
+.err{background:rgba(244,63,94,.12);color:var(--r);padding:14px;border-radius:var(--rad);margin:12px 0}.ptr{text-align:center;color:var(--hint);font-size:12px;height:0;overflow:hidden;transition:height .2s}
+.mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.mode button{border:1px solid var(--ln);background:rgba(127,140,170,.08);color:var(--tx);border-radius:14px;padding:12px 8px;font-weight:700;font-size:13.5px;transition:all .18s}
+.mode button.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 20%,transparent)}
+table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}td,th{padding:7px 4px;text-align:right;border-bottom:1px solid var(--ln)}td:first-child,th:first-child{text-align:left}th{color:var(--hint);font-weight:600;font-size:11px;text-transform:uppercase}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--hint);margin-top:6px}.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.empty{text-align:center;color:var(--hint);padding:28px 10px}.skel{height:84px;border-radius:var(--rad);margin:10px 0;background:linear-gradient(90deg,var(--bg2),rgba(127,140,170,.14),var(--bg2));background-size:200% 100%;animation:sk 1.2s infinite}@keyframes sk{to{background-position:-200% 0}}
+main,header{max-width:1100px;margin:0 auto}.cols{display:grid;grid-template-columns:1fr;gap:0 14px}@media(min-width:820px){.cols{grid-template-columns:1fr 1fr}.grid.g4{grid-template-columns:repeat(4,1fr)}}
+.sel{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 2px 4px}select{background:var(--bg2);color:var(--tx);border:1px solid var(--ln);border-radius:12px;padding:8px 10px;font-size:13.5px}
+.why{font-size:12px;color:var(--hint);margin-top:8px;white-space:pre-line;display:none}.sig.x .why{display:block}.sig{cursor:pointer}.tw{overflow-x:auto}</style></head><body>
+<header><div class="brand"><div class="logo">⚡</div><div><h1>CrypticFx signals</h1><div class="muted" id="hdr">loading…</div></div></div></header>
+<main>
+<div class="card hero" id="hero"><div class="skel"></div></div>
+<div class="grid g4" id="tiercards"></div>
+<div class="cols"><div><h2>📡 Live signals <span class="muted" id="sigcount"></span></h2>
+ <div class="tabs" id="tiers"></div>
+ <div class="sel">Market <select id="mk"><option value="">all</option><option>crypto</option><option>forex</option></select> Status <select id="st"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>be</option><option>expired</option><option>cancelled</option></select> Strategy <select id="sg"><option value="">all</option></select></div>
+ <div id="rows"><div class="skel"></div></div></div>
+<div><h2>📈 Trades &amp; PnL</h2><div class="tabs" id="states"></div><div class="tabs" id="periods"></div><div id="tsum" class="muted" style="margin:0 4px"></div><div id="trows"></div>
+ <h2>🔎 Token</h2><div style="display:flex;gap:8px"><input id="q" placeholder="BTCUSDT, EURUSD…"><button class="btn" id="go">Go</button></div><div id="tok"></div></div></div>
+<h2>🧭 Strategies by tier</h2><div id="strat"></div>
+<p class="muted">⭐ PRIMARY and 🔷 SECONDARY are the two live tiers; 🗄 retired strategies post nothing new and their history is kept. Pending means the signal fired but the limit entry is not filled yet. Live PnL uses the latest price (60s cache). Net R is after fees. Alert mode can only be changed in Telegram (/alerts or the Mini App). This is an educational tool, not financial advice.</p>
+</main>
 <script>
-const f=x=>x<1?x.toPrecision(5):x<50?x.toFixed(5):x.toFixed(2);
-const t=s=>new Date(s).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-let all=[];
-async function load(){
- const st=await (await fetch('/api/stats')).json(); all=await (await fetch('/api/signals?days=30')).json();
- document.getElementById('meta').textContent=`Last scan: ${st.last_scan||'—'} · crypto universe: ${st.universe_size} · open sessions: ${(st.sessions||[]).join(', ')||'none'} · priority FX: ${(st.forex_priority||[]).map(r=>r.pair+' '+r.bias).join(', ')||'—'} · Telegram ${st.telegram?'on':'off'} · AI ${st.ai?'on':'off'}`;
- document.getElementById('cards').innerHTML=[['Signals (30d, ⭐ PRIMARY + ✅ NORMAL)',st.total],['TP hit',st.tp],['SL hit',st.sl],['Open',st.open],['Pending',st.pending],['Win rate',st.win_rate==null?'—':st.win_rate+'%'],['Net R',st.net_r]].map(([a,b])=>`<div class="card"><span class="muted">${a}</span><b class="${a=='TP hit'?'pos':a=='SL hit'?'neg':a=='Net R'?(b>0?'pos':b<0?'neg':''):''}">${b}</b></div>`).join('');
- try{const dn=await (await fetch('/api/don20')).json();document.getElementById('don20').innerHTML=dn.filter(p=>p.status=='open').concat(dn.filter(p=>p.status!='open').slice(0,10)).map(p=>`<tr><td>${p.id}</td><td>${p.symbol}</td><td>${p.direction}</td><td>${(p.opened_at||'').slice(0,16)}</td><td>${+p.entry.toPrecision(6)}</td><td>${+p.init_stop.toPrecision(6)}</td><td>${+p.stop.toPrecision(6)}</td><td>${p.status}</td><td class="${p.net_r>0?'pos':p.net_r<0?'neg':''}">${p.net_r??'—'}</td></tr>`).join('')||'<tr><td colspan=9 class=muted>No DON20 positions yet</td></tr>';}catch(e){}
- try{ALR=await (await fetch('/api/alerts')).json();document.getElementById('alertmode').innerHTML=`🔔 Alert mode: <b>${ALR.mode_label}</b> <span class="muted">(read-only here · change it in Telegram with /alerts or in the mini app)</span> · 💰 profitable now: <b>${ALR.profitable.join(', ')||'none'}</b> <span title="${ALR.definition}" style="cursor:help">ⓘ</span>`}catch(e){}
- const bs=st.by_strategy||{};document.getElementById('strats').innerHTML=Object.entries(bs).map(([k,v])=>`<tr><td>${v.label}${((ALR.table||{})[k]||{}).profitable?' <span class="prim" title="'+ALR.table[k].verdict+'">💰 profitable</span>':((ALR.table||{})[k]&&v.status!='retired'?' <span class="muted" title="'+ALR.table[k].verdict+'">'+(ALR.table[k].profitable===null?'⚪ not enough data':'')+'</span>':'')}</td><td>${v.signals}</td><td>${v.closed}</td><td>${v.open}</td><td>${v.win_rate??'—'}</td><td>${v.gross_r}</td><td class="${v.net_r>0?'pos':v.net_r<0?'neg':''}">${v.net_r}</td><td class="${v.net_per_trade>0?'pos':v.net_per_trade<0?'neg':''}">${v.net_per_trade??'—'}</td></tr>`).join('');
- render();}
-let SGL={},ALR={};fetch('/api/strategies').then(r=>r.json()).then(a=>{a.forEach(x=>SGL[x.key]=x);render()});
-const eff=r=>r.strategy=='FVG'&&r.tags.includes('FVG-D1')?'FVG-D1':(r.strategy||'FVG');
-const isRet=r=>(SGL[eff(r)]||{}).status=='retired';
-function slab(k){const x=SGL[k];if(!x)return `<span class="flag">${k}</span>`;return `<span class="${x.status=='primary'?'prim':'flag'}">${x.label}</span> <b>${k=='MF-REJ'?'FOREX MF-REJ':k}</b>`}
-function render(){const tier=document.getElementById('tier').value,inTier=r=>!tier||(tier=='profitable'?(ALR.profitable||[]).includes(eff(r)):((SGL[eff(r)]||{}).status==tier)),sg=document.getElementById('sg').value,mk=document.getElementById('mk').value,ss=document.getElementById('st').value;
- const MF_TOP5=['USDJPY','GBPJPY','EURUSD','XAUUSD'],MF_SESS=['AUDUSD','NZDUSD','EURAUD','EURCAD','EURNZD','GBPNZD','AUDCAD','NZDCAD','CADCHF','GBPCNH','XAUAUD'];
- function mfl(s){return MF_TOP5.includes(s)?'<span class="prim">⭐ Top5</span>':MF_SESS.includes(s)?'<span class="flag">🕐 Session pair</span>':'<span class="flag">⚡ Strong pair</span>'}
- document.getElementById('rows').innerHTML=all.filter(r=>inTier(r)&&(sg=='__all'||(sg=='__retired'?isRet(r):(!isRet(r)&&(!sg||eff(r)==sg))))&&(!mk||r.market==mk)&&(!ss||r.status==ss)).map(r=>`<tr><td>${r.id}</td><td>${t(r.confirm_time)}</td><td>${slab(eff(r))}${eff(r)=='MF-REJ'?' '+mfl(r.symbol):''}</td><td>${r.symbol} <span class="muted">${r.market}</span></td>
- <td><span class="badge ${r.direction}">${r.direction=="long"?"▲":"▼"} ${r.direction.toUpperCase()}</span></td><td><span class="conf">${r.confidence}%</span><span class="cbar"><i style="width:${Math.min(100,r.confidence)}%"></i></span> ${r.in_session?'':'<span class="flag">off-session</span>'}</td>
- <td>${f(r.entry)}</td><td>${f(r.sl)}</td><td>${r.tp1==null?"":f(r.tp1)+(r.strategy=="MF-REJ"?' <span class="muted">ref</span>':(r.strategy=="PAT-TRIPLE"?' <span class="flag">tracked</span>':""))}</td><td>${r.strategy=="PAT-TRIPLE"?`${f(r.tp2)} <span class="muted">TP2 1:3</span>`:r.strategy=="MF-REJ"?`${f(r.tp)} <span class="muted">TP (next S/R zone) ${(+r.rr).toFixed(2)}R</span>`:f(r.tp)}</td><td><span class="pill ${r.status}">${r.status.toUpperCase()}</span></td>
- <td><details><summary>${r.reasons.length-1} factors</summary>${r.reasons.join('<br>')}</details></td></tr>`).join('')||`<tr><td colspan=11 class="muted">${tier=='primary'?'⭐ PRIMARY = DON20 + CHK – DON20 positions are in the DON20 table above; no open CHK signals right now.':'No signals for this filter'}</td></tr>`;}
-document.getElementById('mk').onchange=render;document.getElementById('tier').onchange=render;document.getElementById('sg').onchange=render;document.getElementById('st').onchange=render;
-async function scan(){await fetch('/api/scan',{method:'POST'});load();}
-load();setInterval(load,60000);
-let TS='open';
-const pc=(v,s='')=>v==null?'—':`<b class="${v>0?'pos':v<0?'neg':''}">${v>0?'+':''}${(+v).toFixed(2)}${s}</b>`;
-const side=d=>`<span class="badge ${d}">${d=="long"?"▲":"▼"} ${d.toUpperCase()}</span>`;
-const stp=s=>`<span class="pill ${s}">${s}</span>`;
-function tcard(a){document.getElementById('tcards').innerHTML=a.map(([k,v,c])=>`<div class="card"><span class="muted">${k}</span><b class="${c||''}">${v}</b></div>`).join('')}
-function trow(r,mode){const sym=`<a href="#" style="color:inherit" onclick="lookup('${r.symbol}');return false">${r.symbol}</a> <span class="muted">${r.market}</span>`;
- const base=`<td>${r.id}</td><td>${sym}</td><td>${side(r.direction)}</td><td>${r.strategy=='MF-REJ'?'FOREX MF-REJ':r.strategy} <span class="${r.strategy_status=='primary'?'prim':'flag'}">${r.strategy_label||''}</span></td><td>${f(r.entry)}</td>`;
- if(mode=='open')return `<tr>${base}<td>${r.sl==null?'':f(r.sl)}</td><td>${r.price_now==null?'—':f(r.price_now)}</td><td>${pc(r.live_pct,'%')}</td><td>${pc(r.live_r,'R')}</td><td>${pc(r.live_net_r,'R')}</td><td>${t(r.filled_at||r.created_at)}</td></tr>`;
- if(mode=='pending')return `<tr>${base}<td>${f(r.sl)}</td><td>${r.tp==null?'':f(r.tp)}</td><td>${t(r.created_at)}</td></tr>`;
- if(mode=='retired')mode='new';
- if(mode=='closed')return `<tr>${base}<td>${stp(r.status)}</td><td>${pc(r.result_r,'R')}</td><td>${pc(r.net_r,'R')}</td><td>${pc(r.net_pct,'%')}</td><td>${r.closed_at?t(r.closed_at):'—'}</td></tr>`;
- return `<tr>${base}<td>${stp(r.status)}</td><td>${r.status=='open'?pc(r.live_net_r,'R')+' <span class="muted">live</span>':pc(r.net_r,'R')}</td><td>${r.status=='open'?pc(r.live_pct,'%'):pc(r.net_pct,'%')}</td><td>${t(r.created_at)}</td></tr>`;}
-const TH={open:['#','Token','Side','Strategy','Entry','Stop','Price now','Live %','Live R','Live net R','Entered'],pending:['#','Token','Side','Strategy','Entry','Stop','TP','Signalled'],
- closed:['#','Token','Side','Strategy','Entry','Result','Gross R','Net R','Net %','Closed'],retired:['#','Token','Side','Strategy','Entry','Status','Net R','%','Signalled'],new:['#','Token','Side','Strategy','Entry','Status','Net R','%','Signalled']};
-async function tload(){const per=document.getElementById('tp').value;const d=await (await fetch(`/api/trades?state=${TS}&period=${per}`)).json();const rows=d.rows||[];
- document.getElementById('thead').innerHTML='<tr>'+TH[TS].map(x=>`<th>${x}</th>`).join('')+'</tr>';
- document.getElementById('trows').innerHTML=rows.map(r=>trow(r,TS)).join('')||`<tr><td colspan=11 class="muted">Nothing here for this period</td></tr>`;
- if(TS=='open'){const up=rows.filter(r=>(r.live_r||0)>0).length;tcard([['Open trades',rows.length],['In profit',up,'pos'],['In loss',rows.length-up,'neg'],['Live net R',(d.open_live_net_r>0?'+':'')+d.open_live_net_r,d.open_live_net_r>0?'pos':d.open_live_net_r<0?'neg':'']])}
- else if(TS=='closed'){const w=rows.filter(r=>(r.result_r||0)>0).length;tcard([['Closed',rows.length],['Win rate',rows.length?Math.round(100*w/rows.length)+'%':'—'],['Net R',d.closed_net_r,d.closed_net_r>0?'pos':d.closed_net_r<0?'neg':'']])}
- else tcard([[TS=='new'?'New signals':'Pending',rows.length]]);}
-async function lookup(sym){sym=sym||document.getElementById('tsym').value;if(!sym)return;document.getElementById('tsym').value=sym;
- const d=await (await fetch('/api/trades/'+encodeURIComponent(sym))).json();const s=d.summary,rows=d.trades||[];
- document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
- tcard([['Token',s.symbol],['Signals',s.trades],['Open',s.open],['Closed',s.closed],['Win rate',s.win_rate==null?'—':s.win_rate+'%'],['Closed net R',s.net_r,s.net_r>0?'pos':s.net_r<0?'neg':''],['Open live net R',s.open_live_net_r,s.open_live_net_r>0?'pos':s.open_live_net_r<0?'neg':'']]);
- document.getElementById('thead').innerHTML='<tr>'+['#','Token','Side','Strategy','Entry','Status','Net R','%','Signalled'].map(x=>`<th>${x}</th>`).join('')+'</tr>';
- document.getElementById('trows').innerHTML=rows.map(r=>trow(r,'new')).join('')||'<tr><td colspan=9 class="muted">No trades for this token</td></tr>';}
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{TS=b.dataset.s;document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x==b));tload()});
-document.getElementById('tp').onchange=tload;document.getElementById('tsym').onkeydown=e=>{if(e.key=='Enter')lookup()};
-tload();setInterval(()=>{if(document.querySelector('.tab.on'))tload()},60000);
+const $=i=>document.getElementById(i),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sg=(v,suf='R',d=2)=>v==null?'–':`<span class="${v>0?'pos':v<0?'neg':''}">${v>0?'+':''}${(+v).toFixed(d)}${suf}</span>`;
+const px=x=>x==null?'–':(+x<1?(+x).toPrecision(5):+x<50?(+x).toFixed(5):(+x).toFixed(2));
+const wat=t=>{if(!t)return'';const d=new Date(String(t).replace(' ','T').replace(/\+00:00$/,'Z').replace(/(\d)$/,'$1Z'));return isNaN(d)?'':d.toLocaleString('en-GB',{timeZone:'Africa/Lagos',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})+' WAT'};
+const J=async u=>{const r=await fetch(u);if(!r.ok)throw new Error(u+' '+r.status);return r.json()};
+const TL={primary:'⭐ Primary',secondary:'🔷 Secondary',retired:'🗄 Retired'};const badge=t=>`<span class="badge b-${t||'retired'}">${TL[t]||esc(t)}</span>`;
+let SGL={},all=[],tier='live',st='open',per='all';
+const eff=r=>r.strategy_key||(r.kind=='don20'?'DON20':(r.strategy=='FVG'&&String(r.tags||'').includes('FVG-D1')?'FVG-D1':(r.strategy||'FVG')));
+const tierOf=k=>(SGL[k]||{}).status||'retired',shortOf=k=>(SGL[k]||{}).short||k;
+const dir=d=>`<span class="dir ${d}">${d=='long'?'▲ LONG':'▼ SHORT'}</span>`;const rr=r=>r.rr?'1:'+(+(+r.rr).toFixed(2)):(r.tp==null?'trail':'–');
+function card(r){const k=eff(r),t=r.strategy_status||tierOf(k),open=r.status=='open';
+ const res=r.net_r!=null?sg(r.net_r):r.result_r!=null&&r.status!='open'?sg(r.result_r):open&&r.live_net_r!=null?sg(r.live_net_r)+' <span class="muted">live</span>':`<span class="pill">${esc(r.status)}</span>`;
+ const why=Array.isArray(r.reasons)?r.reasons.join('\n'):(r.reasons||'');
+ return `<div class="sig t-${t}" onclick="this.classList.toggle('x')"><div class="top"><div><span class="sym">${esc(r.symbol)}</span>${dir(r.direction)}</div>${badge(t)}</div>
+ <div class="lv"><div><span>Entry</span><b>${px(r.entry)}</b></div><div><span>Stop</span><b class="neg">${px(r.sl)}</b></div><div><span>Target</span><b class="pos">${r.tp==null?'trail':px(r.tp)}</b></div><div><span>R:R</span><b>${rr(r)}</b></div></div>
+ <div class="foot"><div>🧭 <b style="color:var(--tx)">${esc(r.strategy_short||shortOf(k))}</b> · ${esc(r.market||'')}${r.confidence?' · win prob '+r.confidence+'%':''}<br>🕒 ${wat(r.confirm_time||r.filled_at||r.created_at)}${r.id?' · #'+r.id:''}</div><div class="res">${res}</div></div>${why?`<div class="why">${esc(why)}</div>`:''}</div>`}
+function chart(eq){if(!eq||!eq.length)return'';const W=600,Hh=130,P=6;let a=0,b=0;const A=[0],B=[0];eq.forEach(e=>{a+=e.primary;b+=e.secondary;A.push(a);B.push(b)});
+ const all=A.concat(B),mx=Math.max(.5,...all),mn=Math.min(-.5,...all),X=i=>P+i*(W-2*P)/(A.length-1),Y=v=>P+(mx-v)*(Hh-2*P)/(mx-mn);
+ const line=S=>S.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(v).toFixed(1)).join(''),area=S=>line(S)+`L${X(S.length-1)},${Y(0)}L${X(0)},${Y(0)}Z`;
+ return `<svg viewBox="0 0 ${W} ${Hh}" width="100%" height="${Hh}" preserveAspectRatio="none" style="display:block;margin-top:8px"><defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f5c542" stop-opacity=".35"/><stop offset="1" stop-color="#f5c542" stop-opacity="0"/></linearGradient><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4f8cff" stop-opacity=".3"/><stop offset="1" stop-color="#4f8cff" stop-opacity="0"/></linearGradient></defs>
+ <line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="rgba(127,140,170,.35)" stroke-dasharray="3 4"/><path d="${area(B)}" fill="url(#gb)"/><path d="${line(B)}" fill="none" stroke="#7aa7ff" stroke-width="2"/><path d="${area(A)}" fill="url(#ga)"/><path d="${line(A)}" fill="none" stroke="#f5c542" stroke-width="2.4"/></svg>
+ <div class="legend"><span><i style="background:#f5c542"></i>⭐ Primary ${sg(a)}</span><span><i style="background:#7aa7ff"></i>🔷 Secondary ${sg(b)}</span><span>· 30 days, closed net R</span></div>`}
+function tierCard(t,s){const w=s.win_rate??0;return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center">${badge(t)}<span class="muted">30d</span></div><div class="v">${sg(s.net_r)}</div><div class="muted">${s.tp}W / ${s.sl}L · win ${s.win_rate==null?'–':s.win_rate+'%'}</div><div class="bar"><i style="width:${Math.min(100,w)}%;background:${t=='primary'?'linear-gradient(90deg,#f5c542,#22c55e)':'linear-gradient(90deg,#4f8cff,#c7d0de)'}"></i></div><div class="muted" style="margin-top:6px">${s.open} open · ${s.pending} pending</div></div>`}
+const chipset=(id,arr,on,attr)=>$(id).innerHTML=arr.map(([k,n])=>`<button class="chip ${k==on?'on':''}" data-${attr}="${k}">${n}</button>`).join('');
+const TIERS=[['live','All live'],['primary','⭐ Primary'],['secondary','🔷 Secondary'],['retired','🗄 Retired']],STATES=[['open','📈 Open'],['pending','⏳ Pending'],['new','🆕 New'],['closed','🏁 Closed'],['retired','🗄 Retired']],PERS=[['day','Day'],['week','Week'],['month','Month'],['all','All time']];
+function chips(){chipset('tiers',TIERS,tier,'t');chipset('states',STATES,st,'s');chipset('periods',PERS,per,'p')}chips();
+$('tiers').onclick=e=>{const b=e.target.closest('button');if(b){tier=b.dataset.t;chips();render()}};$('states').onclick=e=>{const b=e.target.closest('button');if(b){st=b.dataset.s;chips();tload()}};$('periods').onclick=e=>{const b=e.target.closest('button');if(b){per=b.dataset.p;chips();tload()}};
+['mk','st','sg'].forEach(i=>$(i).onchange=render);
+function render(){const mk=$('mk').value,ss=$('st').value,g=$('sg').value;const L=all.filter(r=>{const t=tierOf(eff(r));return (tier=='live'?t!='retired':t==tier)&&(!mk||r.market==mk)&&(!ss||r.status==ss)&&(!g||eff(r)==g)});
+ $('sigcount').textContent=`${L.length} · last 30 days`;$('rows').innerHTML=L.slice(0,120).map(card).join('')||'<div class="empty">📭 No signals for this filter.</div>'}
+async function tload(){try{const d=await J(`/api/trades?state=${st}&period=${per}`);const x=[`<b>${d.count}</b> ${st}`];if(st=='open')x.push('live '+sg(d.open_live_net_r));if(st=='closed'||st=='retired')x.push('net '+sg(d.closed_net_r));$('tsum').innerHTML=x.join(' · ');
+ $('trows').innerHTML=d.rows.slice(0,60).map(card).join('')||'<div class="empty">Nothing here for this period.</div>'}catch(e){$('trows').innerHTML=`<div class="err">${esc(e.message)}</div>`}}
+async function lookup(){const q=$('q').value.trim();if(!q)return;$('tok').innerHTML='<div class="skel"></div>';try{const d=await J('/api/trades/'+encodeURIComponent(q));const s=d.summary;
+ $('tok').innerHTML=`<div class="grid" style="margin-top:10px"><div class="card"><div class="k">${esc(s.symbol)} closed</div><div class="v">${sg(s.net_r)}</div><div class="muted">${s.closed} closed · win ${s.win_rate??'–'}%</div></div><div class="card"><div class="k">Open live</div><div class="v">${sg(s.open_live_net_r)}</div><div class="muted">${s.open} open · ${s.pending} pending</div></div></div>`+(d.trades.map(card).join('')||'<div class="empty">No trades yet.</div>')}catch(e){$('tok').innerHTML=`<div class="err">${esc(e.message)}</div>`}}
+$('go').onclick=lookup;$('q').onkeydown=e=>{if(e.key=='Enter')lookup()};
+async function load(){try{const [S,L,A,E,D]=await Promise.all([J('/api/stats'),J('/api/strategies'),J('/api/alerts').catch(()=>({})),J('/api/equity').catch(()=>[]),J('/api/don20/pnl').catch(()=>null)]);
+ SGL={};L.forEach(x=>SGL[x.key]=x);$('sg').innerHTML='<option value="">all</option>'+L.filter(x=>x.status!='retired').map(x=>`<option value="${x.key}">${x.status=='primary'?'⭐':'🔷'} ${esc(x.short)}</option>`).join('');
+ const ts=S.tier_stats||{};$('hdr').textContent=`Last scan ${wat(S.last_scan)||'–'} · ${S.universe_size} crypto · sessions: ${(S.sessions||[]).join(', ')||'none'} · alerts: ${A.mode_label||'–'}`;
+ $('hero').innerHTML=`<div class="k">Closed net R · 30 days · live tiers</div><div class="v big">${sg(S.net_r)}</div><div class="muted">${S.total} signals · ${S.tp}W / ${S.sl}L · win ${S.win_rate??'–'}% · ${S.open} open · ${S.pending} pending</div>${chart(E)}`;
+ $('tiercards').innerHTML=tierCard('primary',ts.primary||S)+tierCard('secondary',ts.secondary||S)+(D?`<div class="card"><div style="display:flex;justify-content:space-between">${badge('primary')}<span class="muted">DON20</span></div><div class="v">${sg(D.total_net_r)}</div><div class="muted">closed ${sg(D.closed_net_r)} · open live ${sg(D.open_live_net_r)}</div><div class="muted">${D.open} open · ${D.open_in_profit} in profit</div></div>`:'')+`<div class="card"><div class="k">🔔 Alerts</div><div class="v" style="font-size:16px;margin-top:6px">${esc(A.mode_label||'–')}</div><div class="muted">Change in Telegram: /alerts</div></div>`;
+ const bs=S.by_strategy||{},T=A.table||{};let h='';for(const t of ['primary','secondary','retired']){const LL=L.filter(x=>x.status==t);if(!LL.length)continue;h+=`<h2>${badge(t)}<span class="muted">${LL.length}</span></h2><div class="grid g4">`+LL.map(x=>{const v=bs[x.key]||{},p=T[x.key]||{};return `<div class="sig t-${t}" style="margin:0"><div class="top"><span class="sym">${esc(x.short)}</span>${p.profitable?'<span class="pill" style="color:var(--g)">💰</span>':''}</div><div class="muted" style="margin:3px 0 6px;font-size:12px">${esc(x.name)}</div><div class="foot"><span>${v.closed??0} closed · win ${v.win_rate??'–'}${v.win_rate!=null?'%':''}</span><span class="res">${sg(v.net_r,'',1)}</span></div></div>`}).join('')+'</div>'}
+ $('strat').innerHTML=h;all=await J('/api/signals?days=30');render();tload()}catch(e){$('hero').innerHTML=`<div class="err">${esc(e.message)}</div>`}}
+load();setInterval(()=>{if(!document.hidden)load()},60000);
 </script></body></html>

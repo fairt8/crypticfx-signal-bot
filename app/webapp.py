@@ -50,14 +50,30 @@ def page():   # static shell only; all data comes from /app/api/* with initData
 def me(request: Request):
     u = auth(request); return dict(ok=True, first_name=u.get("first_name"))
 
+def equity(days=30):
+    """Daily closed net R (signals + DON20) for the last `days` days, per tier, for the PnL chart."""
+    from . import trades, strategies as SG
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc); start = (now - timedelta(days=days-1)).date()
+    D = {(start + timedelta(days=i)).isoformat(): {"primary": 0.0, "secondary": 0.0} for i in range(days)}
+    for r in trades._sig_rows("WHERE 1=1") + trades._don_rows():
+        if r.get("net_r") is None: continue
+        t = trades._ts(r.get("closed_at")); tier = SG.status(r.get("strategy"))
+        if not t or tier not in SG.TIERS: continue
+        k = (t + timedelta(hours=1)).date().isoformat()   # WAT day
+        if k in D: D[k][tier] += r["net_r"]
+    return [dict(d=k, primary=round(v["primary"], 3), secondary=round(v["secondary"], 3)) for k, v in sorted(D.items())]
+
 @router.get("/app/api/overview")
 def overview(request: Request):
     auth(request)
-    from . import trades, scanner
+    from . import trades, scanner, alerts
     op = trades.by_state("open", "all")
-    return dict(stats=db.stats(), don20=trades.don20_pnl(), open_count=len(op),
+    try: eq = equity(30)
+    except Exception: eq = []
+    return dict(stats=db.stats(), tier_stats={t: db.stats(tier=t) for t in ("primary", "secondary")}, don20=trades.don20_pnl(), open_count=len(op),
                 open_live_net_r=round(sum(r.get("live_net_r") or 0 for r in op), 2),
-                open_in_profit=sum((r.get("live_net_r") or 0) > 0 for r in op),
+                open_in_profit=sum((r.get("live_net_r") or 0) > 0 for r in op), equity=eq, alert_mode=alerts.get_mode(), alert_label=alerts.MODE_LABEL[alerts.get_mode()],
                 last_scan=scanner.STATE.get("last_scan"), counts=scanner.STATE.get("last_counts"), sessions=scanner.STATE.get("sessions"))
 
 @router.get("/app/api/trades")
@@ -99,18 +115,18 @@ def app_alerts_set(request: Request, body: ModeIn):
 
 @router.get("/app/api/signals")
 def app_signals(request: Request, days: int = 3, tier: str = ""):
+    """Live-tier signals (⭐ PRIMARY + 🔷 SECONDARY by default, or one tier) with the fields the signal cards need."""
     auth(request)
     from . import strategies as SG, alerts
-    if tier:
-        if tier not in alerts.TIERS: raise HTTPException(400, "bad tier")
-        from .web import tier_rows
-        keep = ("id", "symbol", "market", "direction", "status", "entry", "sl", "tp", "confidence", "setup_score", "created_at", "result_r", "net_r", "kind")
-        return [dict({x: r.get(x) for x in keep}, strategy_key=r["strategy_key"], label=SG.label(r["strategy_key"]), active=True) for r in tier_rows(max(1, min(days, 30)), tier)[:80]]
-    keep = ("id", "symbol", "market", "strategy", "direction", "status", "entry", "sl", "tp", "confidence", "setup_score", "created_at", "result_r")
-    out = []
-    for r in db.recent(max(1, min(days, 30)))[:60]:
-        k = SG.eff(r.get("strategy"), r.get("tags")); d = {x: r.get(x) for x in keep}
-        d.update(strategy_key=k, label=SG.label(k), active=SG.active(k)); out.append(d)
+    if tier and tier not in alerts.TIERS: raise HTTPException(400, "bad tier")
+    from .web import tier_rows
+    keep = ("id", "symbol", "market", "direction", "status", "entry", "sl", "tp", "rr", "confidence", "setup_score", "created_at", "confirm_time",
+            "filled_at", "closed_at", "result_r", "net_r", "kind", "price_now", "live_r", "live_net_r")
+    days = max(1, min(days, 30)); rows = tier_rows(days, tier) if tier else tier_rows(days, "primary") + tier_rows(days, "secondary")
+    rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True); out = []
+    for r in rows[:100]:
+        k = r.get("strategy_key") or r.get("strategy") or "DON20"
+        out.append(dict({x: r.get(x) for x in keep}, strategy_key=k, short=SG.short(k), tier=SG.status(k), label=SG.label(k), active=True))
     return out
 
 def latest_backtest():

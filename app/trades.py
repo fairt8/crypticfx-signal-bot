@@ -62,7 +62,7 @@ def _sig(r):
     risk = abs(r["entry"] - r["sl"]); rf = risk / r["entry"] if r["entry"] else 0
     st = SG.eff(r.get("strategy"), r.get("tags"))
     d = dict(kind="signal", id=r["id"], symbol=r["symbol"], market=r["market"], strategy=st, strategy_key=r.get("strategy"),
-             strategy_status=SG.status(st), strategy_label=SG.label(st),
+             strategy_status=SG.status(st), strategy_label=SG.label(st), strategy_short=SG.short(st),
              direction=r["direction"], status=r["status"], entry=r["entry"], sl=r["sl"], tp=r["tp"], rr=r.get("rr"),
              created_at=r.get("created_at"), filled_at=r.get("filled_at"), closed_at=r.get("closed_at"),
              risk_frac=rf, cost=_cost(r["symbol"], r["market"]))
@@ -73,7 +73,7 @@ def _sig(r):
 def _don(p):
     st = "open" if p["status"] == "open" else "closed"; risk = abs(p["entry"] - p["init_stop"])
     d = dict(kind="don20", id=p["id"], symbol=p["symbol"], market="crypto", strategy="DON20", strategy_key="DON20",
-             strategy_status=SG.status("DON20"), strategy_label=SG.label("DON20"), direction=p["direction"],
+             strategy_status=SG.status("DON20"), strategy_label=SG.label("DON20"), strategy_short="DON20", direction=p["direction"],
              status=st, entry=p["entry"], sl=p["stop"], init_stop=p["init_stop"], tp=None, rr=None,
              created_at=p.get("opened_at"), filled_at=p.get("opened_at"), closed_at=p.get("closed_at"),
              risk_frac=risk/p["entry"] if p["entry"] else 0, cost=0.001)

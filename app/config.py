@@ -43,8 +43,8 @@ MIN_CONFIDENCE_TO_POST = int(E("MIN_CONFIDENCE_TO_POST", "0"))
 MIN_STOP_PCT_CRYPTO = float(E("MIN_STOP_PCT_CRYPTO", "0.3"))  # skip crypto setups whose stop is closer than this % (fees dominate)
 MIN_STOP_PCT_FOREX = float(E("MIN_STOP_PCT_FOREX", "0"))
 # confidence % = logistic(a + b*raw_setup_score), fitted on closed backtest trades. Forex slope was negative/noise -> flat base rate.
-EXPERIMENTAL_MARKETS = set(E("EXPERIMENTAL_MARKETS", "crypto").split(","))  # backtest edge (if any) was crypto-only
-ENABLE_CHK = E("ENABLE_CHK", "1") == "1"   # CHK: ⭐ PRIMARY and live again since 2026-10-27 (was paused 2026-10-21..27). Pause: ENABLE_CHK=0
+EXPERIMENTAL_MARKETS = set(E("EXPERIMENTAL_MARKETS", "crypto").split(","))  # markets where the crypto-FVG family / CHK run (gate kept; not a tier)
+ENABLE_CHK = E("ENABLE_CHK", "1") == "1"   # CHK: 🔷 SECONDARY (user 2026-10-31); live since 2026-10-27 (was paused 2026-10-21..27). Pause: ENABLE_CHK=0
 MIN_CRYPTO_VOL_USD = float(E("MIN_CRYPTO_VOL_USD", "1000000"))   # skip NEW crypto signals (all strategies) when 24h quote volume < this; 0 = off (bt_filters/backtest-report-filters.md)
 CHK_CONFIDENCE = int(E("CHK_CONFIDENCE", "27"))  # observed CHK crypto win rate across the whole backtest (~27%: 22.4% IS, 30.7% OOS)
 FVG_STOP = E("FVG_STOP", "fvg")  # "fvg" = beyond the 3 FVG candles (video); "swing" = swing low/high of the leg (creator PDF plan)
@@ -53,15 +53,15 @@ CACHE_MAX_SYMBOLS = int(E("CACHE_MAX_SYMBOLS", "600"))   # cap on per-symbol in-
 PAT_DONE_MAX = int(E("PAT_DONE_MAX", "5000"))          # cap on the PAT/BRK "bar already evaluated" set
 ENABLE_D1 = E("ENABLE_D1", "1") == "1"
 CALIB = {"crypto": (-1.3039, 0.00523), "forex": (-1.0018, 0.0)}  # refit 13 Oct on 15m FVG backtest (backtest-report-v2.md)
-ENABLE_FVG_PLAN = E("ENABLE_FVG_PLAN", "1") == "1"    # FVG-PLAN swing-stop variant: NORMAL strategy again (user 2026-10-18)
+ENABLE_FVG_PLAN = E("ENABLE_FVG_PLAN", "1") == "1"    # FVG-PLAN [🔷 SECONDARY]: 1.5× swing stop, 3R (user 2026-10-31)
 ENABLE_FVG_LIVE = E("ENABLE_FVG_LIVE", "0") == "1"    # plain "FVG (live)" rows: RETIRED 2026-10-18 (code kept; FVG-D1 / FVG-PLAN derive from the same setup)
-ENABLE_FVG_TREND = E("ENABLE_FVG_TREND", "0") == "1"  # FVG+TREND tag: off (loses live + backtest)
+ENABLE_FVG_TREND = E("ENABLE_FVG_TREND", "1") == "1"  # FVG+TREND [🔷 SECONDARY] own rows: 1h-candle stop at fill, 3R (user 2026-10-31, research/stop_variants_3r)
 PTP_STRATS = set(filter(None, E("PTP_STRATS", "FVG,FVG-D1,CHK").split(",")))  # tracked outcome = 50% at TP1 (1.5R), SL to entry, rest to TP (bt_ptp)
-ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [EXPERIMENTAL] forex zone rejection (strategy.MF_PAIRS)
-ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [EXPERIMENTAL] daily Donchian-20 crypto breakout
-ENABLE_PAT = E("ENABLE_PAT", "1") == "1"   # PAT-WEDGE / PAT-TRIPLE / PAT-CUP [EXPERIMENTAL – paper] 4H pattern retests (app/patterns_live.py)
-ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [EXPERIMENTAL – paper] 4H crypto neckline/trendline breakout (see BRK_MARKETS/BRK_LEVELS)
-PAT_ENABLED = set(x for x in E("PAT_ENABLED", "PAT-TRIPLE").split(",") if x)   # live PAT-* strategies; PAT-WEDGE / PAT-CUP off by default (failed one backtest half)
+ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [⭐ PRIMARY] forex zone rejection (strategy.MF_PAIRS)
+ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [⭐ PRIMARY] daily Donchian-20 crypto breakout
+ENABLE_PAT = E("ENABLE_PAT", "1") == "1"   # PAT-WEDGE / PAT-TRIPLE (FX + crypto) 4H pattern retests (tiers in strategies.py) (app/patterns_live.py)
+ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [⭐ PRIMARY] 4H crypto neckline/trendline breakout (see BRK_MARKETS/BRK_LEVELS)
+PAT_ENABLED = set(x for x in E("PAT_ENABLED", "PAT-TRIPLE,PAT-WEDGE,PAT-TRIPLE-C").split(",") if x)   # live PAT-*: FX triple (⭐), crypto wedge 1.5× stop (⭐), crypto triple 2× stop (🔷); PAT-CUP retired
 BRK_MARKETS = set(E("BRK_MARKETS", "crypto").split(","))   # BRK markets (forex BRK lost in backtest: -0.06/-0.09R)
 BRK_LEVELS = E("BRK_LEVELS", "pattern")   # pattern = neckline/trendline breaks only; horizontal | both re-enable S/R-level breaks (lost in backtest)
 PAT_MAX_PER_SCAN = int(E("PAT_MAX_PER_SCAN", "3"))   # max new posts per PAT-*/BRK strategy per scan (no bursts)

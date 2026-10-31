@@ -99,28 +99,28 @@ def net_r(r):
     if r["result_r"] is None: return None
     risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if str(r["symbol"]).startswith("XA") else r["market"]   # XAUUSD, XAGUSD, synthetic XAUAUD
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
-STRATS = {"FVG": "FVG (live)", "FVG+TREND": "FVG + 4H trend [EXPERIMENTAL]", "CHK": "⭐ CHK Varsity checklist [PRIMARY]", "FVG-PLAN": "FVG creator plan, swing stop [EXPERIMENTAL]", "FVG-D1": "FVG-D1 [EXPERIMENTAL]", "MF-REJ": "FOREX MF-REJ [experimental – collecting live results]",
-          "PAT-WEDGE": "PAT-WEDGE 4H wedge retest, 1:3 [EXPERIMENTAL – paper]", "PAT-TRIPLE": "PAT-TRIPLE 4H FX triple top/bottom retest, 1:1.5 [EXPERIMENTAL – paper]",
-          "PAT-CUP": "PAT-CUP 4H cup & handle retest, 1:3 [EXPERIMENTAL – paper]", "BRK": "BRK 4H crypto neckline/trendline breakout, 1:3 [EXPERIMENTAL – paper]"}
+STRATS = ("MF-REJ", "PAT-TRIPLE", "PAT-WEDGE", "BRK", "CHK", "FVG-D1", "FVG-PLAN", "PAT-TRIPLE-C", "FVG+TREND", "FVG", "PAT-CUP")   # + DON20 (own table); labels from strategies.py
+EXACT = ("FVG+TREND",)   # match on the strategy column only (old FVG rows merely *tagged* FVG+TREND used the old stop, not the live 1h-candle rule)
 def by_strategy(days=60):
     from . import strategies as SG
     rs = recent(days, 20000); out = {}
     for k in STRATS:
         label = SG.full(k)
-        sub = [r for r in rs if k in r["tags"] or r.get("strategy") == k]; cl = [r for r in sub if r["status"] in CLOSED]
+        sub = [r for r in rs if r.get("strategy") == k or (k not in EXACT and k in r["tags"])]; cl = [r for r in sub if r["status"] in CLOSED]
         w = sum((r["result_r"] or 0) > 0 for r in cl); nets = [net_r(r) for r in cl]
-        out[k] = dict(label=label, status=SG.status(k), signals=len(sub), closed=len(cl), open=sum(r["status"] in ("open","pending") for r in sub),
+        out[k] = dict(label=label, short=SG.short(k), tier_label=SG.label(k), status=SG.status(k), signals=len(sub), closed=len(cl), open=sum(r["status"] in ("open","pending") for r in sub),
             win_rate=round(100*w/len(cl),1) if cl else None, gross_r=round(sum(r["result_r"] for r in cl),2),
             net_r=round(sum(nets),2), net_per_trade=round(sum(nets)/len(cl),3) if cl else None)
     try:
-        from . import don20; out["DON20"] = dict(don20.summary(), label=SG.full("DON20"), status=SG.status("DON20"))
+        from . import don20; out["DON20"] = dict(don20.summary(), label=SG.full("DON20"), short="DON20", tier_label=SG.label("DON20"), status=SG.status("DON20"))
     except Exception as e: out["DON20"] = dict(label=SG.full("DON20"), status="primary", signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
-    rank = {s: i for i, s in enumerate(SG.ORDER)}   # PRIMARY, NORMAL, EXPERIMENTAL, then RETIRED
+    rank = {s: i for i, s in enumerate(SG.ORDER)}   # PRIMARY, SECONDARY, then RETIRED
     return dict(sorted(out.items(), key=lambda kv: (rank.get(kv[1].get("status"), 9), list(SG.STATUS).index(kv[0]) if kv[0] in SG.STATUS else 99)))
-def stats(days=30):
-    """Headline stats: ⭐ PRIMARY + ✅ NORMAL signal strategies only (🧪 experimental / 🗄 retired are in by_strategy)."""
+def stats(days=30, tier=None):
+    """Headline stats: ⭐ PRIMARY + 🔷 SECONDARY signal strategies (or one tier); 🗄 retired ones are only in by_strategy."""
     from . import strategies as SG
-    rs = [r for r in recent(days, 10000) if SG.main_stats(SG.eff(r.get("strategy"), r.get("tags")))]; closed = [r for r in rs if r["status"] in CLOSED]
+    ok = (lambda k: SG.status(k) == tier) if tier else SG.main_stats
+    rs = [r for r in recent(days, 10000) if ok(SG.eff(r.get("strategy"), r.get("tags")))]; closed = [r for r in rs if r["status"] in CLOSED]
     w = sum((r["result_r"] or 0) > 0 for r in closed)
     return dict(total=len(rs), tp=w, sl=len(closed)-w, open=sum(r["status"]=="open" for r in rs),
         pending=sum(r["status"]=="pending" for r in rs), expired=sum(r["status"]=="expired" for r in rs),

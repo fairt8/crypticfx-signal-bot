@@ -1,4 +1,4 @@
-"""DON20 [EXPERIMENTAL – paper test]: crypto daily Donchian-20 breakout, 3xATR(20) chandelier trail, no fixed target.
+"""DON20 [⭐ PRIMARY]: crypto daily Donchian-20 breakout, 3xATR(20) chandelier trail, no fixed target.
 Rules from bt_sys/sys_bt.py ('Donchian20 D1 3xATR', crypto LS) / backtest-report-systematic.md.
 Runs once a day after the 00:00 UTC daily close in its own thread (never blocks the 15-min scan)."""
 import time, threading, json
@@ -67,8 +67,12 @@ def prices():
 def close(p, x, when, post, msgs):
     g, n = _r(p, x)
     _upd(p["id"], status="closed", closed_at=when, exit_price=x, result_r=round(g, 3), net_r=round(n, 3))
-    msgs.append(f"EXIT DON20 {p['direction'].upper()} {p['symbol']} ⭐ [PRIMARY]\nTrailing stop hit at {fmtp(x)} "
-                f"(entry {fmtp(p['entry'])}).\nResult: {g:+.2f}R gross, {n:+.2f}R after fees.")
+    from .telegram import esc, code, wat
+    ic = "✅" if n > 0 else "❌"
+    msgs.append("\n".join([f"{ic} <b>EXIT · ⭐ PRIMARY · DON20</b>", "━━━━━━━━━━━━━━",
+        f"{'🟢 LONG' if p['direction']=='long' else '🔴 SHORT'}  <b>{esc(p['symbol'])}</b>  · crypto  #{p['id']}",
+        f"📍 Entry   {code(p['entry'])}", f"🚪 Exit    {code(x)}  <i>(trailing stop)</i>",
+        f"💰 Result  <b>{g:+.2f}R</b> gross · <b>{n:+.2f}R</b> net", f"🕒 {wat(when)}"]))
 def fmtp(x):
     from .telegram import fmt_price; return fmt_price(x)
 
@@ -98,7 +102,7 @@ def _send(msgs, post, entries=()):
         if entries: alerts.mute([dict(symbol=n["symbol"], strategy="DON20") for n in entries])
         return
     for t in msgs:
-        try: telegram.send(t)
+        try: telegram.send(t, html=True)
         except Exception as e: STATE["errors"].append(f"telegram: {e}")
 
 def daily_run(universe, post=True, now=None):
@@ -150,15 +154,23 @@ def daily_run(universe, post=True, now=None):
             r = cur.fetchone()
         if not r: continue
         n["id"] = r["id"] if db.PG else r[0]
-        msgs.append(f"⭐ DON20 {n['direction'].upper()} {n['symbol']} [PRIMARY]\n#{n['id']} Daily close {fmtp(n['close'])} "
-                    f"{'above the 20-day high' if n['direction']=='long' else 'below the 20-day low'}\nEntry (market, now): {fmtp(n['entry'])}\n"
-                    f"Initial stop (3×ATR20, 1R): {fmtp(n['stop'])}\nTrailing 3×ATR, no fixed target, expect ~40% wins, avg winner ~1.4R.\n"
-                    "Daily trailing-stop updates follow; EXIT is posted when the stop is hit.\n"
-                    f"Optional: take 50% at 1.5R ({fmtp(n['entry'] + (1.5 if n['direction']=='long' else -1.5)*abs(n['entry']-n['stop']))}), move SL to entry, trail the rest.\n\nNot financial advice.")
+        from .telegram import esc, code, wat
+        r1 = abs(n['entry']-n['stop']); sd = 1 if n['direction'] == 'long' else -1
+        msgs.append("\n".join([f"⭐ <b>PRIMARY · DON20</b>", "━━━━━━━━━━━━━━",
+            f"{'🟢 <b>LONG</b>' if sd == 1 else '🔴 <b>SHORT</b>'}  <b>{esc(n['symbol'])}</b>  · crypto  #{n['id']}", "",
+            f"📍 <b>Entry</b>   {code(n['entry'])}  <i>(market, daily close)</i>",
+            f"🛑 <b>Stop</b>    {code(n['stop'])}  <i>(3×ATR20 = 1R, {100*r1/n['entry']:.2f}%)</i>",
+            f"🎯 <b>Target</b>  <i>none – 3×ATR trailing stop</i>",
+            f"⚖️ <b>R:R</b>     open-ended · optional 50% at 1.5R {code(n['entry'] + sd*1.5*r1)}",
+            f"🧭 <b>Strategy</b> DON20 · daily Donchian-20 breakout",
+            f"🕒 {wat(now.isoformat())}", "",
+            f"💡 Daily close {code(n['close'])} {'above the 20-day high' if sd == 1 else 'below the 20-day low'}. Trail updates daily; EXIT is posted when the stop is hit.",
+            "", "<i>Not financial advice.</i>"]))
     if trail:
-        lines = [f"⭐ DON20 trailing stops – {now.strftime('%d %b')} [PRIMARY]"]
+        from .telegram import esc, code
+        lines = [f"⭐ <b>PRIMARY · DON20 trailing stops</b> – {now.strftime('%d %b')}", "━━━━━━━━━━━━━━"]
         for p, old, new in trail:
-            lines.append(f"• {p['symbol']} {p['direction'].upper()} entry {fmtp(p['entry'])} → stop {fmtp(new)}" + ("" if new != old else " (unchanged)"))
+            lines.append(f"{'🟢' if p['direction']=='long' else '🔴'} <b>{esc(p['symbol'])}</b> entry {code(p['entry'])} → 🛑 {code(new)}" + ("" if new != old else " <i>(unchanged)</i>"))
         msgs.append("\n".join(lines))
     _send(msgs, post, new_pos)
     res = dict(day=now.strftime("%Y-%m-%d"), fetched=len(data), universe=len(universe), new=len(new_pos),
