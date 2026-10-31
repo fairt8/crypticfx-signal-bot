@@ -1,0 +1,532 @@
+{
+ "DON20, current rules": {
+  "n": 1220,
+  "net": 270.9,
+  "1%": {
+   "trades": 1220,
+   "end": 4254.0,
+   "ret": 325.4,
+   "mdd": 55.2,
+   "streak": 26,
+   "maxopen": 44,
+   "below10": false,
+   "blown": null,
+   "max_lev": 3.8,
+   "worst_month": [
+    "2024-08",
+    -22.9
+   ],
+   "years": {
+    "2023": -0.4,
+    "2024": 195.5,
+    "2025": -17.0,
+    "2026": 74.2
+   }
+  },
+  "10%": {
+   "trades": 12,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 12,
+   "maxopen": 16,
+   "below10": true,
+   "blown": "2023-10-13 00:00:00+00:00",
+   "max_lev": 70.5,
+   "worst_month": [
+    "2023-10",
+    -100.0
+   ],
+   "years": {
+    "2023": -100.0
+   }
+  },
+  "fixed $10": {
+   "trades": 1220,
+   "end": 3709.13,
+   "ret": 270.9,
+   "mdd": 31.8,
+   "streak": 26,
+   "maxopen": 44,
+   "below10": false,
+   "blown": null,
+   "max_lev": 3.2,
+   "worst_month": [
+    "2023-10",
+    -21.6
+   ],
+   "years": {
+    "2023": 0.7,
+    "2024": 201.5,
+    "2025": -6.1,
+    "2026": 30.1
+   }
+  }
+ },
+ "PAT-WEDGE, 1.5x stop 3R": {
+  "n": 2265,
+  "net": 107.5,
+  "1%": {
+   "trades": 2265,
+   "end": 1616.04,
+   "ret": 61.6,
+   "mdd": 63.2,
+   "streak": 31,
+   "maxopen": 29,
+   "below10": false,
+   "blown": null,
+   "max_lev": 9.8,
+   "worst_month": [
+    "2024-05",
+    -27.1
+   ],
+   "years": {
+    "2023": 7.3,
+    "2024": 21.5,
+    "2025": -5.6,
+    "2026": 31.3
+   }
+  },
+  "10%": {
+   "trades": 61,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 14,
+   "maxopen": 16,
+   "below10": true,
+   "blown": "2023-11-09 14:45:00+00:00",
+   "max_lev": 77.2,
+   "worst_month": [
+    "2023-11",
+    -100.0
+   ],
+   "years": {
+    "2023": -100.0
+   }
+  },
+  "fixed $10": {
+   "trades": 2265,
+   "end": 2075.0,
+   "ret": 107.5,
+   "mdd": 70.4,
+   "streak": 31,
+   "maxopen": 29,
+   "below10": false,
+   "blown": null,
+   "max_lev": 18.8,
+   "worst_month": [
+    "2024-05",
+    -39.3
+   ],
+   "years": {
+    "2023": 9.8,
+    "2024": 42.0,
+    "2025": 6.6,
+    "2026": 24.8
+   }
+  }
+ },
+ "BRK, current stop 3R": {
+  "n": 5093,
+  "net": 67.6,
+  "1%": {
+   "trades": 5093,
+   "end": 149.98,
+   "ret": -85.0,
+   "mdd": 92.3,
+   "streak": 53,
+   "maxopen": 35,
+   "below10": true,
+   "blown": null,
+   "max_lev": 16.2,
+   "worst_month": [
+    "2024-05",
+    -57.6
+   ],
+   "years": {
+    "2023": -8.5,
+    "2024": -26.9,
+    "2025": -80.9,
+    "2026": 17.1
+   }
+  },
+  "10%": {
+   "trades": 302,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 19,
+   "maxopen": 18,
+   "below10": true,
+   "blown": "2024-01-09 21:00:00+00:00",
+   "max_lev": 248.4,
+   "worst_month": [
+    "2024-01",
+    -100.0
+   ],
+   "years": {
+    "2023": -99.8,
+    "2024": -100.0
+   }
+  },
+  "fixed $10": {
+   "trades": 908,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 23,
+   "maxopen": 28,
+   "below10": true,
+   "blown": "2024-06-15 14:00:00+00:00",
+   "max_lev": 79.4,
+   "worst_month": [
+    "2024-06",
+    -100.0
+   ],
+   "years": {
+    "2023": -0.8,
+    "2024": -100.0
+   }
+  }
+ },
+ "PAT-TRIPLE forex, current rules": {
+  "n": 165,
+  "net": 22.4,
+  "1%": {
+   "trades": 165,
+   "end": 1229.65,
+   "ret": 23.0,
+   "mdd": 26.5,
+   "streak": 15,
+   "maxopen": 4,
+   "below10": false,
+   "blown": null,
+   "max_lev": 21.0,
+   "worst_month": [
+    "2024-12",
+    -5.2
+   ],
+   "years": {
+    "2024": -22.7,
+    "2025": 38.5,
+    "2026": 14.9
+   }
+  },
+  "10%": {
+   "trades": 165,
+   "end": 1970.29,
+   "ret": 97.0,
+   "mdd": 96.5,
+   "streak": 15,
+   "maxopen": 4,
+   "below10": true,
+   "blown": null,
+   "max_lev": 209.8,
+   "worst_month": [
+    "2024-12",
+    -43.1
+   ],
+   "years": {
+    "2024": -94.3,
+    "2025": 1394.2,
+    "2026": 132.9
+   }
+  },
+  "fixed $10": {
+   "trades": 165,
+   "end": 1223.57,
+   "ret": 22.4,
+   "mdd": 29.3,
+   "streak": 15,
+   "maxopen": 4,
+   "below10": false,
+   "blown": null,
+   "max_lev": 19.7,
+   "worst_month": [
+    "2024-12",
+    -6.7
+   ],
+   "years": {
+    "2024": -25.5,
+    "2025": 44.6,
+    "2026": 13.5
+   }
+  }
+ },
+ "FVG+TREND, 1h candle stop 3R": {
+  "n": 4293,
+  "net": 17.1,
+  "1%": {
+   "trades": 4293,
+   "end": 325.12,
+   "ret": -67.5,
+   "mdd": 91.1,
+   "streak": 32,
+   "maxopen": 21,
+   "below10": true,
+   "blown": null,
+   "max_lev": 43.6,
+   "worst_month": [
+    "2026-04",
+    -66.5
+   ],
+   "years": {
+    "2023": -10.5,
+    "2024": 71.7,
+    "2025": -68.0,
+    "2026": -33.8
+   }
+  },
+  "10%": {
+   "trades": 677,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 16,
+   "maxopen": 18,
+   "below10": true,
+   "blown": "2024-04-14 16:45:00+00:00",
+   "max_lev": 303.2,
+   "worst_month": [
+    "2024-04",
+    -100.0
+   ],
+   "years": {
+    "2023": -99.9,
+    "2024": -100.0
+   }
+  },
+  "fixed $10": {
+   "trades": 4293,
+   "end": 1170.54,
+   "ret": 17.1,
+   "mdd": 77.6,
+   "streak": 32,
+   "maxopen": 21,
+   "below10": false,
+   "blown": null,
+   "max_lev": 30.8,
+   "worst_month": [
+    "2026-04",
+    -57.2
+   ],
+   "years": {
+    "2023": -4.5,
+    "2024": 91.4,
+    "2025": -33.6,
+    "2026": -3.5
+   }
+  }
+ },
+ "FVG-PLAN, 1.5x stop 3R": {
+  "n": 4604,
+  "net": 16.3,
+  "1%": {
+   "trades": 4604,
+   "end": 204.66,
+   "ret": -79.5,
+   "mdd": 92.2,
+   "streak": 46,
+   "maxopen": 31,
+   "below10": true,
+   "blown": null,
+   "max_lev": 13.0,
+   "worst_month": [
+    "2026-04",
+    -61.0
+   ],
+   "years": {
+    "2023": 11.8,
+    "2024": 5.4,
+    "2025": -65.7,
+    "2026": -49.4
+   }
+  },
+  "10%": {
+   "trades": 82,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 11,
+   "maxopen": 11,
+   "below10": true,
+   "blown": "2023-10-26 14:45:00+00:00",
+   "max_lev": 152.2,
+   "worst_month": [
+    "2023-10",
+    -100.0
+   ],
+   "years": {
+    "2023": -100.0
+   }
+  },
+  "fixed $10": {
+   "trades": 4604,
+   "end": 1162.8,
+   "ret": 16.3,
+   "mdd": 90.9,
+   "streak": 46,
+   "maxopen": 31,
+   "below10": true,
+   "blown": null,
+   "max_lev": 38.5,
+   "worst_month": [
+    "2026-04",
+    -49.3
+   ],
+   "years": {
+    "2023": 21.2,
+    "2024": 45.6,
+    "2025": -22.3,
+    "2026": -15.2
+   }
+  }
+ },
+ "MF-REJ forex, current rules": {
+  "n": 172,
+  "net": 14.9,
+  "1%": {
+   "trades": 172,
+   "end": 1145.51,
+   "ret": 14.6,
+   "mdd": 9.8,
+   "streak": 5,
+   "maxopen": 3,
+   "below10": false,
+   "blown": null,
+   "max_lev": 55.2,
+   "worst_month": [
+    "2025-08",
+    -3.8
+   ],
+   "years": {
+    "2024": 5.4,
+    "2025": -5.1,
+    "2026": 14.5
+   }
+  },
+  "10%": {
+   "trades": 172,
+   "end": 1228.05,
+   "ret": 22.8,
+   "mdd": 70.1,
+   "streak": 5,
+   "maxopen": 3,
+   "below10": false,
+   "blown": null,
+   "max_lev": 552.4,
+   "worst_month": [
+    "2025-08",
+    -33.4
+   ],
+   "years": {
+    "2024": -2.0,
+    "2025": -58.1,
+    "2026": 198.8
+   }
+  },
+  "fixed $10": {
+   "trades": 172,
+   "end": 1149.41,
+   "ret": 14.9,
+   "mdd": 9.7,
+   "streak": 5,
+   "maxopen": 3,
+   "below10": false,
+   "blown": null,
+   "max_lev": 48.8,
+   "worst_month": [
+    "2025-08",
+    -3.6
+   ],
+   "years": {
+    "2024": 6.0,
+    "2025": -4.6,
+    "2026": 13.7
+   }
+  }
+ },
+ "ALL 7": {
+  "n": 17812,
+  "net": 516.7,
+  "1% compounding": {
+   "trades": 17812,
+   "end": 26.6,
+   "ret": -97.3,
+   "mdd": 99.9,
+   "streak": 85,
+   "maxopen": 103,
+   "below10": true,
+   "blown": null,
+   "max_lev": 171.8,
+   "worst_month": [
+    "2025-05",
+    -97.3
+   ],
+   "years": {
+    "2023": 1.8,
+    "2024": 15.0,
+    "2025": -97.4,
+    "2026": -13.9
+   }
+  },
+  "10% compounding": {
+   "trades": 23,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 13,
+   "maxopen": 27,
+   "below10": true,
+   "blown": "2023-10-02 16:00:00+00:00",
+   "max_lev": 166.6,
+   "worst_month": [
+    "2023-10",
+    -100.0
+   ],
+   "years": {
+    "2023": -100.0
+   }
+  },
+  "Fixed $10 / trade": {
+   "trades": 17812,
+   "end": 6166.9,
+   "ret": 516.7,
+   "mdd": 86.3,
+   "streak": 85,
+   "maxopen": 103,
+   "below10": false,
+   "blown": null,
+   "max_lev": 95.0,
+   "worst_month": [
+    "2023-11",
+    -81.7
+   ],
+   "years": {
+    "2023": 26.4,
+    "2024": 315.7,
+    "2025": -26.8,
+    "2026": 60.4
+   }
+  },
+  "Fixed $100 / trade": {
+   "trades": 28,
+   "end": 0.0,
+   "ret": -100.0,
+   "mdd": 100.0,
+   "streak": 18,
+   "maxopen": 27,
+   "below10": true,
+   "blown": "2023-10-03 08:30:00+00:00",
+   "max_lev": 585.4,
+   "worst_month": [
+    "2023-10",
+    -100.0
+   ],
+   "years": {
+    "2023": -100.0
+   }
+  }
+ }
+}
