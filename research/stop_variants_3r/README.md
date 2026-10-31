@@ -33,3 +33,36 @@ One 2/3 / 1/3 split; 14.5 months of crypto history (survivorship: today's top 30
 
 ## Run
 `W=4 python3 bt_crypto.py; W=3 python3 bt_fx.py; python3 report.py` (box only; ~10 min; under ~200 MB per worker). out/ and data/ are git-ignored.
+
+---
+
+# 3-year extension (results3y.md / results3y.json)
+
+Follow-up question: "the backtest should be at least 3 years for all" + "backtest MF-REJ and PAT-TRIPLE in crypto".
+
+## Periods and data
+- **Crypto: 2023-10-01 → 2026-10-29 (3.08 years).** Binance bulk 15m klines (data.binance.vision, from 2022-10 for indicator warm-up), `fetch_crypto.py`.
+  Universe = today's top 50 USDT pairs by volume (stablecoins / tokenised stocks / PAXG excluded) + BTC/ETH; each coin enters 12 days after its listing
+  (no survivorship cut-off). Survivors subset = the 25 coins listed before Oct 2022 (reported on its own line under each table).
+- **Forex: 2024-01-24 → 2026-10-30 (2.77 years), 19 pairs, Yahoo 1H** (`FXSRC=yahoo`). XAUUSD/XAUAUD on Yahoo start 2024-06-09.
+  Yahoo does not serve 1H older than ~730 days back from the first cache, so **3 full years of forex is not available from Yahoo.**
+  Dukascopy (free) has the history, but its server throttles bulk downloads (503 / SSL drops, ~20 s per file at 2 threads), so `fetch_fx.py`
+  (Dukascopy BID 1H, 2022-09 → 2026-09, cached per pair-month in data/duka/) was still running at commit time. When it finishes:
+  `python3 fetch_fx.py && W=1 python3 bt_fx3y.py && python3 report3y.py` gives the 4-year forex version (writes data/fx3y.pkl).
+- Same variants, fees, follow windows and floors as above. Blocks: Y1 = 2023-10-01 → 2024-10-31, Y2 = → 2025-10-31, Y3 = last 12 months; plus a
+  first-2/3 vs last-1/3 split and calendar years. ✅ = net R > 0 AND positive in a majority of the Y1–Y3 blocks AND positive in Y3 (last 12 months).
+
+## Crypto ports
+- **MF-REJ (crypto):** the live forex signal function unchanged (ATR-based levels), with the session filter disabled
+  (`MF_SESSIONS_UTC["24h"]=(0,24)`, every coin mapped to it), live cap of 2 signals/day/pair, stops under the 0.3% crypto floor skipped.
+- **PAT-TRIPLE (crypto):** `pat_series("PAT-TRIPLE", h4, "crypto")`, live TP 1.5R.
+
+## Bug found and fixed
+The previous run passed `max_age_min=10**6` (≈ 694 days) to the live signal functions, which silently dropped CHK and MF-REJ signals older than that
+(the earlier forex MF-REJ result really covered only ~Dec 2024 → Oct 2026, not 33 months). Fixed (`10**8`). Forex MF-REJ and crypto MF-REJ were re-run
+(`out3y_fixmf/`, merged by report3y.py). **CHK (retired) was not re-run for time; its 3-year table covers 2024-12-05 → 2026-10-29 only (~23 months).**
+It loses under every variant there; re-run with `ONLY=CHK CRYOUT=out3y_fix SIDP=x W=2 python3 bt_crypto3y.py` (~3 min/coin) and merge if needed.
+
+## Run
+`python3 fetch_crypto.py; W=2 python3 bt_crypto3y.py; FXSRC=yahoo W=1 python3 bt_fx3y.py; python3 report3y.py` (box only, ~1.5 h at 2 workers;
+~0.6 GB per worker). data/, out3y*/, out_fx*/ are git-ignored.
