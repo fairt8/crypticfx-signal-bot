@@ -7,6 +7,7 @@ except Exception:
 E = os.getenv
 BASE = Path(__file__).resolve().parent.parent
 DB_PATH = E("DB_PATH", str(BASE / "signals.db"))
+SUMMARY_EVERY_H = int(E("SUMMARY_EVERY_H", "6"))  # PnL/position summary cadence (hours)
 DATABASE_URL = E("DATABASE_URL", "")  # Postgres (e.g. Neon) when set; SQLite fallback otherwise
 BINANCE_BASE = E("BINANCE_BASE", "https://data-api.binance.vision")  # public market-data mirror; api.binance.com also works
 BINANCE_API_KEY = E("BINANCE_API_KEY", "")

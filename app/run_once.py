@@ -1,4 +1,4 @@
-"""One-shot scan for GitHub Actions: scan -> outcomes -> DON20 daily (when due) -> 2h summary (when due), then exit.
+"""One-shot scan for GitHub Actions: scan -> outcomes -> DON20 daily (when due) -> 6h summary (when due), then exit.
 Telegram via sendMessage only (no webhook server). Uses the DB 'scheduler' lease so it never overlaps a Render scheduler."""
 import sys, time, threading
 from datetime import datetime, timezone
@@ -18,8 +18,8 @@ def main():
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         th = threading.Thread(target=lambda: don20.daily_run(scanner.crypto_universe(), post=post), daemon=True); th.start()
         th.join(C.SCAN_WATCHDOG_S); db.kv_set("don20_last_day", day)
-    if post and telegram.enabled() and summary.due(2):
-        ok = telegram.send(summary.build(2), html=True)
+    if post and telegram.enabled() and summary.due(C.SUMMARY_EVERY_H):
+        ok = telegram.send(summary.build(C.SUMMARY_EVERY_H), html=True)
         if ok: db.kv_set("last_summary_at", datetime.now(timezone.utc).isoformat())
         print(f"[run_once] summary sent={ok}", flush=True)
     print(f"[run_once] total {time.time()-t0:.0f}s counts={scanner.STATE.get('last_counts')} errors={scanner.STATE['errors'][:5]}", flush=True)

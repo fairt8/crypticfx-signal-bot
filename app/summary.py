@@ -1,12 +1,14 @@
-"""2-hourly Telegram summary (posted from the server scheduler)."""
+"""6-hourly Telegram PnL/position summary (posted from the server scheduler; cadence = config.SUMMARY_EVERY_H)."""
 import time, threading
 from datetime import datetime, timezone, timedelta
 from . import db, telegram, scanner
+from . import config as C
 from .telegram import fmt_price
 def label(r):
     from . import strategies as SG
     k = SG.eff(r.get("strategy"), r.get("tags")); return f"{SG.label(k).split()[0]} {SG.short(k)}"
-def build(hours=2):
+def build(hours=None):
+    hours = hours or C.SUMMARY_EVERY_H
     from .telegram import esc, code, wat
     now = datetime.now(timezone.utc); since = (now - timedelta(hours=hours)).isoformat()
     rs = db.recent(10); new = [r for r in rs if r["created_at"] >= since]
@@ -17,7 +19,7 @@ def build(hours=2):
             d = "🟢 LONG" if r["direction"] == "long" else "🔴 SHORT"
             L.append(f"• #{r['id']} {d} <b>{esc(r['symbol'])}</b> · {esc(label(r))}\n   📍 {code(r['entry'])}  🛑 {code(r['sl'])}  🎯 {code(r['tp'])}  📊 {r['confidence']}%")
     else:
-        L += ["", "💤 <i>No new signals in the last 2h.</i>"]
+        L += ["", f"💤 <i>No new signals in the last {hours}h.</i>"]
         wl = sorted(scanner.STATE.get("watch", []), key=lambda w: w["dist_pct"])[:5]
         if wl:
             L += ["", "👀 <b>Closest to a setup</b> <i>(watch only – not signals)</i>"]
@@ -55,7 +57,9 @@ def build(hours=2):
 def due(every_h):
     last = db.kv_get("last_summary_at")
     return not last or datetime.now(timezone.utc) - datetime.fromisoformat(last) >= timedelta(hours=every_h) - timedelta(minutes=2)
-def loop(every_h=2):
+def loop(every_h=None):
+    every_h = every_h or C.SUMMARY_EVERY_H
+    print(f"[summary] scheduler started: every {every_h}h", flush=True)
     while not scanner.STATE.get("last_scan"): time.sleep(10)   # need watchlist data from a scan first
     while True:
         try:
