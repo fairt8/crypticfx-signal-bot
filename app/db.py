@@ -7,17 +7,29 @@ if PG:
     import psycopg
     from psycopg.rows import dict_row
 
+import collections, time as _time
+ERRORS = collections.deque(maxlen=200)   # recent DB errors (time + kind only, never the message/URL): desk health banner
+def note_error(e):
+    m = str(e).lower(); quota = "quota" in m
+    op = isinstance(e, sqlite3.OperationalError) or (PG and isinstance(e, psycopg.OperationalError))   # connection / server-side failures only
+    if quota or op: ERRORS.append(dict(t=_time.time(), kind="quota" if quota else "db"))
 class _Conn:
     """Tiny adapter so the same SQL (with ? placeholders) runs on SQLite and Postgres."""
     def __init__(self):
-        if PG: self.c = psycopg.connect(C.DATABASE_URL, row_factory=dict_row, autocommit=False, connect_timeout=15)
-        else: self.c = sqlite3.connect(C.DB_PATH, check_same_thread=False, timeout=30); self.c.row_factory = sqlite3.Row
+        try:
+            if PG: self.c = psycopg.connect(C.DATABASE_URL, row_factory=dict_row, autocommit=False, connect_timeout=15)
+            else: self.c = sqlite3.connect(C.DB_PATH, check_same_thread=False, timeout=30); self.c.row_factory = sqlite3.Row
+        except Exception as e: note_error(e); raise
     def execute(self, sql, params=()):
-        if PG: return self.c.execute(sql.replace("?", "%s"), params or None)
-        return self.c.execute(sql, params)
+        try:
+            if PG: return self.c.execute(sql.replace("?", "%s"), params or None)
+            return self.c.execute(sql, params)
+        except Exception as e: note_error(e); raise
     def __enter__(self): return self
     def __exit__(self, et, e, tb):
-        (self.c.rollback if et else self.c.commit)(); self.c.close()
+        try: (self.c.rollback if et else self.c.commit)()
+        except Exception as x: note_error(x); raise
+        finally: self.c.close()
 def conn(): return _Conn()
 
 ID = "SERIAL PRIMARY KEY" if PG else "INTEGER PRIMARY KEY"

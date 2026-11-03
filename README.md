@@ -19,7 +19,7 @@ uvicorn app.web:app --port 8000          # dashboard at http://localhost:8000, s
 | app/db.py | SQLite history |
 | app/telegram.py | posts signals; /signals /history [days] /stats /explain id /ask question /start |
 | app/ai.py | OpenAI-compatible chat; off when `LLM_API_KEY` is empty |
-| app/web.py + dashboard.html | FastAPI: `/`, `/api/signals?days=30`, `/api/stats`, `POST /api/scan`, `/api/explain/{id}`, `POST /api/chat` |
+| app/web.py + desk.html | FastAPI: `/` (signal desk: equity in $/R, positions, alerts, PnL), `/api/desk` (cached 60s), `/api/signals?days=30`, `/api/stats`, `POST /api/scan`, `/api/explain/{id}`, `POST /api/chat` |
 
 ## Confidence score (heuristic, not a probability)
 Base 45 when the core rules are met, then: 4H EMA50/200 trend +7 · 4H HH/HL structure +7 (−5 if against) · FVG at swing S/R +6 · 5m RSI not stretched +4 (−4) · MACD histogram agrees +5 · candlestick pattern (engulfing, hammer, star, three-inside, tweezer, doji) +6 · Fib 50–78.6% retracement +6 · crypto volume spike +5 · in London/NY session +8, else −10 and flagged · forex: priority pair +5, strength bias agrees +5 (−5). Clamped to 5–95. Weights are untested guesses; backtest before trusting them.

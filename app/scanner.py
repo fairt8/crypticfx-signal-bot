@@ -157,7 +157,7 @@ def scan(crypto=True, fx=True, post=True, gen=None):
     try:
         from . import alerts; alerts.refresh()   # profitable-strategy set, recomputed every scan (shared via DB)
     except Exception as e: STATE["errors"].append(f"alerts: {e}")
-    STATE["last_scan"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["errors"] = STATE["errors"][-20:]
+    STATE["last_scan"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["last_scan_ts"] = time.time(); STATE["errors"] = STATE["errors"][-20:]
     STATE["last_counts"] = dict(scanned_crypto=len([k for k in cache if k.endswith("USDT")]),
         scanned_forex=len([k for k in cache if not k.endswith("USDT")]), candidates=len(found), new=len(new))
     print(f"[scan] done in {time.time()-t0:.0f}s {STATE['last_counts']}", flush=True)
@@ -177,7 +177,7 @@ def _run_once():
         except Exception as e: STATE["errors"].append(f"scan: {e}"); print(f"[scan] crashed: {e!r}", flush=True)
     th = threading.Thread(target=target, daemon=True, name=f"scan-{gen}")
     stop = threading.Event(); threading.Thread(target=_renew, args=(stop,), daemon=True).start()
-    STATE["scan_started"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); th.start(); th.join(C.SCAN_WATCHDOG_S); stop.set()
+    STATE["scan_started"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["scan_started_ts"] = time.time(); th.start(); th.join(C.SCAN_WATCHDOG_S); stop.set()
     if th.is_alive():
         STATE["gen"] = gen + 1   # orphan the hung scan; its results will be dropped
         STATE["errors"].append(f"watchdog: scan {gen} exceeded {C.SCAN_WATCHDOG_S}s, abandoned")

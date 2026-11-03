@@ -1,0 +1,238 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light"><title>CrypticFx · Signal desk</title><script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#0a0e16);--bg2:var(--tg-theme-secondary-bg-color,#121826);--tx:var(--tg-theme-text-color,#e9edf5);--hint:var(--tg-theme-hint-color,#8590a6);
+--acc:var(--tg-theme-button-color,#4f8cff);--atx:var(--tg-theme-button-text-color,#fff);--ln:rgba(127,140,170,.16);--tile:rgba(127,140,170,.08);--g:#22c55e;--r:#f43f5e;--gold:#f5c542;--gold2:#22c55e;--blue:#4f8cff;--silver:#c7d0de;--rad:18px;--sh:0 10px 30px rgba(0,0,0,.35)}
+html[data-theme=dark]{--bg:#0a0e16;--bg2:#121826;--tx:#e9edf5;--hint:#8590a6;--acc:#4f8cff;--atx:#fff;--ln:rgba(127,140,170,.16);--tile:rgba(127,140,170,.08)}
+html[data-theme=light]{--bg:#f3f5fa;--bg2:#ffffff;--tx:#141a26;--hint:#6b7489;--acc:#2f6bf0;--atx:#fff;--ln:rgba(20,30,60,.10);--tile:rgba(20,30,60,.045);--g:#12a150;--r:#e11d48;--sh:0 8px 24px rgba(20,30,60,.10)}
+@media (prefers-color-scheme:light){html.web:not([data-theme]){--bg:#f3f5fa;--bg2:#fff;--tx:#141a26;--hint:#6b7489;--acc:#2f6bf0;--ln:rgba(20,30,60,.10);--tile:rgba(20,30,60,.045);--g:#12a150;--r:#e11d48;--sh:0 8px 24px rgba(20,30,60,.10)}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{background:var(--bg)}
+body{margin:0;color:var(--tx);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,system-ui,Segoe UI,Roboto,sans-serif;padding-bottom:calc(86px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+header{position:sticky;top:0;z-index:6;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--ln)}
+.hd{display:flex;align-items:center;gap:10px;padding:12px 14px;max-width:1120px;margin:0 auto}.brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.logo{width:36px;height:36px;border-radius:11px;display:grid;place-items:center;font-size:18px;background:linear-gradient(135deg,var(--gold),#ff8a3d);box-shadow:0 4px 14px rgba(245,197,66,.25);flex:none}
+h1{font-size:17px;margin:0;letter-spacing:-.2px;white-space:nowrap}.muted{color:var(--hint);font-size:12.5px}.sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ln);background:var(--bg2);border-radius:999px;padding:6px 11px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--g);box-shadow:0 0 0 3px color-mix(in srgb,var(--g) 25%,transparent)}.live.bad i{background:var(--r);box-shadow:0 0 0 3px color-mix(in srgb,var(--r) 25%,transparent)}.live.bad{color:var(--r)}
+.ib{width:38px;height:38px;border-radius:12px;border:1px solid var(--ln);background:var(--bg2);color:var(--tx);display:grid;place-items:center;cursor:pointer;flex:none}.ib svg{width:18px;height:18px}.ib.spin svg{animation:sp .8s linear infinite}@keyframes sp{to{transform:rotate(360deg)}}
+main{padding:6px 12px 0;max-width:1120px;margin:0 auto}.sec{display:none}.sec.on{display:block;animation:in .25s cubic-bezier(.2,.8,.2,1)}@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.card{background:var(--bg2);border:1px solid var(--ln);border-radius:var(--rad);padding:16px;margin:12px 0}
+.hero{position:relative;overflow:hidden;background:radial-gradient(110% 120% at 100% 0%,rgba(99,102,241,.30),transparent 60%),radial-gradient(90% 120% at 0% 0%,rgba(79,140,255,.16),transparent 60%),var(--bg2);box-shadow:var(--sh)}
+.k{font-size:11.5px;color:var(--hint);text-transform:uppercase;letter-spacing:.7px;font-weight:600}.v{font-size:24px;font-weight:780;letter-spacing:-.4px}.v.big{font-size:36px;letter-spacing:-.8px;margin:2px 0 6px}
+.pos{color:var(--g)}.neg{color:var(--r)}
+h2{font-size:12.5px;margin:22px 4px 8px;letter-spacing:1px;text-transform:uppercase;color:var(--hint);display:flex;align-items:center;justify-content:space-between;gap:8px}h2 a{color:var(--acc);text-transform:none;letter-spacing:0;font-size:13px;cursor:pointer;font-weight:600}
+.pills{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.pill{font-size:12px;padding:3px 10px;border-radius:999px;background:var(--tile);color:var(--tx);font-weight:650;white-space:nowrap}
+.pill.pos{background:color-mix(in srgb,var(--g) 15%,transparent);color:var(--g)}.pill.neg{background:color-mix(in srgb,var(--r) 15%,transparent);color:var(--r)}.pill.acc{background:color-mix(in srgb,var(--acc) 18%,transparent);color:var(--acc);cursor:pointer}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.tile{background:var(--tile);border:1px solid var(--ln);border-radius:12px;padding:8px 10px;min-width:0}.tile span{display:block;font-size:11px;color:var(--hint)}.tile b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.hero .tiles .tile span{text-transform:uppercase;letter-spacing:.6px;font-size:10.5px}.hero .tiles .tile b{font-size:17px}
+.eqh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.eqh b.t{font-size:16px}.dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:7px;vertical-align:1px}
+.eqrow{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:10px}.eqrow .rt{text-align:right;font-size:12.5px;color:var(--hint);line-height:1.5}
+.dl{margin-top:10px}.dl div{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:13.5px}.dl div span{color:var(--hint)}.dl div b{text-align:right}
+.g2{display:grid;grid-template-columns:1fr;gap:0 14px}.g2>.card{margin:8px 0}
+.badge{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:7px;text-transform:uppercase;white-space:nowrap;background:var(--tile);color:var(--hint)}
+.b-long{color:var(--g);background:color-mix(in srgb,var(--g) 15%,transparent)}.b-short{color:var(--r);background:color-mix(in srgb,var(--r) 15%,transparent)}
+.b-primary{color:#1b1300;background:linear-gradient(135deg,var(--gold),#ffe08a)}.b-secondary{color:#0b1530;background:linear-gradient(135deg,#8fb4ff,var(--silver))}.b-retired{color:var(--hint)}
+.b-st{color:#93b4ff;background:rgba(79,140,255,.14)}html[data-theme=light] .b-st{color:#2f5fd0}
+.pc{background:var(--bg2);border:1px solid var(--ln);border-radius:var(--rad);padding:14px;margin:10px 0;cursor:pointer}.pc .top{display:flex;justify-content:space-between;gap:8px}.pc .sym{font-weight:800;font-size:17px;margin-right:6px}
+.pc .bl{display:flex;flex-wrap:wrap;gap:5px;align-items:center}.pc .rr{text-align:right;flex:none}.pc .rr b{font-size:19px;font-weight:800;display:block}.pc .rr small{font-size:12px}
+.lv3{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 4px}.lv3 span{display:block;font-size:10.5px;color:var(--hint);text-transform:uppercase;letter-spacing:.6px}.lv3 b{font-size:13.5px;font-weight:600;word-break:break-all}
+.prog{position:relative;height:8px;border-radius:9px;margin:14px 2px 4px;background:linear-gradient(90deg,color-mix(in srgb,var(--r) 22%,transparent) var(--e),color-mix(in srgb,var(--g) 14%,transparent) var(--e))}
+.prog .f{position:absolute;top:0;bottom:0;border-radius:9px}.prog .e{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--hint);border-radius:2px}.prog .s{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--r);border-radius:2px}
+.prog .kn{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;border:3px solid var(--g);background:var(--bg2)}.prog .kn.n{border-color:var(--r)}
+.pl{display:flex;justify-content:space-between;font-size:11px;color:var(--hint);position:relative;height:16px}.pl .pe{position:absolute;transform:translateX(-50%)}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;background:var(--bg2);border:1px solid var(--ln);border-radius:14px;padding:4px;margin:10px 0}
+.seg button{border:0;background:none;color:var(--hint);font-weight:700;font-size:14px;padding:10px 6px;border-radius:10px;cursor:pointer}.seg button.on{background:var(--tile);color:var(--tx);box-shadow:inset 0 0 0 1px var(--ln)}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 8px;scrollbar-width:none;align-items:center}.tabs::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--ln);border-radius:999px;padding:6px 13px;background:var(--bg2);color:var(--tx);font-size:13px;font-weight:650;cursor:pointer}.chip.on{background:color-mix(in srgb,var(--acc) 22%,transparent);color:var(--acc);border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+.bar2{display:flex;justify-content:space-between;align-items:center;gap:8px}.sum{font-weight:800;font-size:14px;white-space:nowrap}
+.sig{background:var(--bg2);border:1px solid var(--ln);border-radius:var(--rad);padding:13px 14px;margin:10px 0;position:relative;overflow:hidden;cursor:pointer}
+.sig:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}.sig.t-primary:before{background:linear-gradient(var(--gold),var(--gold2))}.sig.t-secondary:before{background:linear-gradient(var(--blue),var(--silver))}.sig.t-retired:before{background:var(--hint)}
+.sig .top{display:flex;justify-content:space-between;align-items:center;gap:8px}.lv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 8px}.lv div{background:var(--tile);border-radius:10px;padding:6px 8px}.lv span{display:block;font-size:10.5px;color:var(--hint);text-transform:uppercase}.lv b{font-size:13px;word-break:break-all}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;color:var(--hint)}.res{font-weight:800;font-size:15px;text-align:right}
+.why{font-size:12px;color:var(--hint);margin-top:8px;white-space:pre-line;display:none}.sig.x .why{display:block}
+.al{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--ln);cursor:pointer}.al:last-child{border-bottom:0}.al .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--tile);flex:none;font-size:15px}.al .m{flex:1;min-width:0}.al .m b{font-size:14.5px}.al .x{text-align:right;font-size:12.5px;flex:none}
+.banner{border-radius:14px;padding:11px 14px;margin:10px 0 0;font-size:13.5px;display:flex;gap:10px;align-items:flex-start}.banner.bad{background:color-mix(in srgb,var(--r) 14%,transparent);color:var(--r);border:1px solid color-mix(in srgb,var(--r) 30%,transparent)}.banner.warn{background:color-mix(in srgb,var(--gold) 14%,transparent);color:#d9a514;border:1px solid color-mix(in srgb,var(--gold) 30%,transparent)}
+nav{position:fixed;left:0;right:0;bottom:0;z-index:9;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(14px);border-top:1px solid var(--ln);padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+nav .in{display:flex;max-width:560px;margin:0 auto}nav button{flex:1;border:0;background:none;color:var(--hint);font-size:11.5px;font-weight:650;padding:6px 0 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}nav button svg{width:22px;height:22px}nav button.on{color:var(--acc)}
+input,select{padding:10px 12px;border-radius:12px;border:1px solid var(--ln);background:var(--bg2);color:var(--tx);font-size:16px;outline:none}input{width:100%}input:focus{border-color:var(--acc)}select{font-size:13.5px;padding:7px 10px}
+.btn{border:0;border-radius:12px;padding:10px 18px;background:var(--acc);color:var(--atx);font-weight:700;cursor:pointer}
+.mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}.mode button{border:1px solid var(--ln);background:var(--tile);color:var(--tx);border-radius:12px;padding:11px 8px;font-weight:700;font-size:13.5px;cursor:pointer}.mode button.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 20%,transparent)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}td,th{padding:7px 4px;text-align:right;border-bottom:1px solid var(--ln)}td:first-child,th:first-child{text-align:left}th{color:var(--hint);font-weight:600;font-size:11px;text-transform:uppercase}
+.err{background:color-mix(in srgb,var(--r) 12%,transparent);color:var(--r);padding:14px;border-radius:var(--rad);margin:12px 0}.empty{text-align:center;color:var(--hint);padding:26px 10px}
+.skel{height:90px;border-radius:var(--rad);margin:12px 0;background:linear-gradient(90deg,var(--bg2),var(--tile),var(--bg2));background-size:200% 100%;animation:sk 1.2s infinite}@keyframes sk{to{background-position:-200% 0}}
+.ptr{text-align:center;color:var(--hint);font-size:12px;height:0;overflow:hidden;transition:height .2s}.nochart{height:60px;display:grid;place-items:center;color:var(--hint);font-size:12.5px}
+.set{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.set label{font-size:12px;color:var(--hint);display:block}.sel{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:2px 2px 6px;font-size:13px;color:var(--hint)}
+.sl{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--ln)}.sl:last-child{border-bottom:0}
+@media(min-width:860px){.g2{grid-template-columns:1fr 1fr}.hero .v.big{font-size:40px}.pcg{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}.hd{padding:12px 20px}main{padding:6px 20px 0}}
+</style></head><body>
+<header><div class="hd"><div class="brand"><div class="logo">⚡</div><div style="min-width:0"><h1>CrypticFx</h1><div class="muted sub" id="hsub">signal desk</div></div></div>
+<span class="live" id="live"><i></i><span>Live</span></span>
+<button class="ib" id="thb" title="Theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg></button>
+<button class="ib" id="rfb" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button></div></header>
+<div class="ptr" id="ptr">↓ pull to refresh</div>
+<main><div id="banner"></div>
+<section class="sec on" id="s-home"><div class="skel" style="height:300px"></div><div class="skel"></div></section>
+<section class="sec" id="s-pos"><div class="seg" id="pseg"></div><div id="pbody"></div></section>
+<section class="sec" id="s-alerts"><div id="amode"></div><h2>Recent alerts · 7 days <span class="muted" id="acount" style="text-transform:none;letter-spacing:0"></span></h2><div class="card" id="afeed" style="padding:4px 14px"></div>
+ <h2>Live signals</h2><div class="tabs" id="stiers"></div><div class="sel">Days <select id="sdays"><option>1</option><option selected>7</option><option>30</option></select> Market <select id="smk"><option value="">all</option><option>crypto</option><option>forex</option></select> Status <select id="sst"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>be</option><option>expired</option><option>cancelled</option></select> Strategy <select id="ssg"><option value="">all</option></select></div><div id="slist" class="pcg"></div></section>
+<section class="sec" id="s-pnl"></section>
+<section class="sec" id="s-more"></section>
+</main>
+<nav><div class="in" id="nav"></div></nav>
+<script>
+const MODE='__MODE__',APP=MODE==='app';document.documentElement.classList.add(APP?'app':'web');
+const tg=APP&&window.Telegram&&Telegram.WebApp?Telegram.WebApp:null;if(tg){tg.ready();tg.expand();try{tg.setHeaderColor('bg_color');tg.setBackgroundColor('bg_color')}catch(e){}try{tg.disableVerticalSwipes&&tg.disableVerticalSwipes()}catch(e){}}
+const ID=tg?tg.initData:'';const H=(k)=>{try{tg&&(k?tg.HapticFeedback.notificationOccurred(k):tg.HapticFeedback.selectionChanged())}catch(e){}};
+const $=i=>document.getElementById(i),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// ---- settings (this device only) ----
+const SK='cfx_desk_v2';let S=Object.assign({start:1000,risk:10,unit:'usd',theme:'auto'},(()=>{try{return JSON.parse(localStorage.getItem(SK)||'{}')}catch(e){return{}}})());
+const saveS=()=>{try{localStorage.setItem(SK,JSON.stringify(S))}catch(e){}};
+function applyTheme(){const r=document.documentElement;if(S.theme=='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',S.theme)}applyTheme();
+// ---- formatting ----
+const MINUS='−',cls=v=>v>0?'pos':v<0?'neg':'';
+const fmtR=(v,d=2)=>v==null?'–':(v>0?'+':v<0?MINUS:'')+Math.abs(v).toFixed(d)+'R';
+const usd=(v,sgn=true)=>v==null?'–':(sgn?(v>0?'+':v<0?MINUS:''):(v<0?MINUS:''))+'$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const usd0=v=>usd(v,false).replace(/\.00$/,'');const D=r=>r==null?null:r*S.risk;
+const amt=(r,d)=>S.unit=='r'?fmtR(r,d):usd(D(r));const alt=(r,d)=>S.unit=='r'?usd(D(r)):fmtR(r,d);
+const sg=(r,d)=>`<span class="${cls(r)}">${amt(r,d)}</span>`;const sR=(v,d=2)=>v==null?'–':`<span class="${cls(v)}">${fmtR(v,d)}</span>`;
+const eqv=r=>S.unit=='r'?fmtR(r,1):usd(S.start+D(r),false);const pct=r=>(D(r)/S.start*100);
+const px=x=>{if(x==null)return'–';x=+x;let s=x<1?x.toPrecision(5):x<50?x.toFixed(5):x.toFixed(2);if(s.includes('.')&&x<50)s=s.replace(/0+$/,'').replace(/\.$/,'');return s};
+const wat=(t,o)=>{if(!t)return'';const d=new Date(String(t).replace(' ','T').replace(/\+00:00$/,'Z').replace(/(\d)$/,'$1Z'));return isNaN(d)?'':d.toLocaleString('en-GB',Object.assign({timeZone:'Africa/Lagos',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'},o||{}))+' WAT'};
+const ago=s=>s==null?'–':s<90?Math.round(s)+'s':s<5400?Math.round(s/60)+'m':s<172800?Math.round(s/3600)+'h':Math.round(s/86400)+'d';
+const TL={primary:'⭐ Primary',secondary:'🔷 Secondary',retired:'🗄 Retired'},tierB=t=>`<span class="badge b-${t||'retired'}">${TL[t]||esc(t)}</span>`,dirB=d=>`<span class="badge b-${d}">${d=='long'?'▲ Long':'▼ Short'}</span>`,stB=s=>`<span class="badge b-st">${esc(s)}</span>`;
+const COL={'DON20':'#f5c542','MF-REJ':'#22d3ee','PAT-TRIPLE':'#a78bfa','PAT-WEDGE':'#f472b6','BRK':'#fb923c','CHK':'#60a5fa','FVG-D1':'#34d399','FVG-PLAN':'#818cf8','PAT-TRIPLE-C':'#c084fc','FVG+TREND':'#2dd4bf',primary:'#f5c542',secondary:'#7aa7ff'};
+// ---- api ----
+const EP=APP?{desk:'/app/api/desk',trades:'/app/api/trades',token:s=>'/app/api/token/'+s,signals:(d)=>'/app/api/signals?days='+d}:{desk:'/api/desk',trades:'/api/trades',token:s=>'/api/trades/'+s,signals:(d)=>'/api/signals?days='+d};
+async function J(u,o){const r=await fetch(u,Object.assign({headers:APP?{'X-Telegram-Init-Data':ID,'Content-Type':'application/json'}:{'Content-Type':'application/json'}},o||{}));if(!r.ok){let m=r.status;try{m=(await r.json()).detail||m}catch(e){}throw new Error(m)}return r.json()}
+const ERR=e=>`<div class="err">⚠️ ${esc(e.message||e)}${APP&&!ID?'<br><br>Open this from <b>@CrypticFxBot</b> (☰ menu or /app). It only works inside Telegram, for the owner.':''}</div>`;
+// ---- chart ----
+let CID=0;function chart(pts,h,opt){opt=opt||{};if(!pts||pts.length<3)return`<div class="nochart" style="height:${h}px">Equity curve starts after the first closed trade</div>`;
+ const W=600,P=4,ts=pts.map((p,i)=>{const t=Date.parse(p[0]);return isNaN(t)?i:t}),vs=pts.map(p=>p[1]),t0=ts[0],t1=ts[ts.length-1]||1;
+ const mn=Math.min(0,...vs),mx=Math.max(0,...vs),sp=(mx-mn)||1,X=t=>((t-t0)/((t1-t0)||1))*W,Y=v=>P+(mx-v)/sp*(h-2*P);
+ const last=vs[vs.length-1],c=last>=0?'var(--g)':'var(--r)',hex=last>=0?'#22c55e':'#f43f5e',id='cg'+(++CID);
+ const ln=vs.map((v,i)=>(i?'L':'M')+X(ts[i]).toFixed(1)+','+Y(v).toFixed(1)).join('');
+ return `<div style="position:relative;margin-top:10px"><svg viewBox="0 0 ${W} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="display:block;overflow:visible"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${hex}" stop-opacity=".32"/><stop offset="1" stop-color="${hex}" stop-opacity="0"/></linearGradient></defs>
+ <path d="${ln}L${W},${h}L0,${h}Z" fill="url(#${id})"/><line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--hint)" stroke-opacity=".55" stroke-dasharray="4 5" vector-effect="non-scaling-stroke"/>
+ <path d="${ln}" fill="none" stroke="${c}" stroke-width="${opt.w||2}" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>
+ <span style="position:absolute;right:-4px;top:${Y(last)-4}px;width:9px;height:9px;border-radius:50%;background:${c};box-shadow:0 0 0 3px color-mix(in srgb,${c} 30%,transparent)"></span>
+ ${opt.axis?`<div class="pl" style="margin-top:4px"><span>${wat(pts[0][0],{hour:undefined,minute:undefined}).replace(' WAT','')}</span><span>now</span></div>`:''}</div>`}
+// ---- state ----
+let DESK=null,fetchedAt=0,cur='home',pseg='open',pfil='all',hst='closed',hper='week',stier='',tokOpen=false,SIGS=null,LST={};
+const NAV=[['home','Home','<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'],['pos','Positions','<path d="M4 20V10M9 20V4M14 20v-8M19 20v-5M2 20h20"/>'],['alerts','Alerts','<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>'],['pnl','PnL','<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'],['more','More','<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
+$('nav').innerHTML=NAV.map(([k,n,p])=>`<button data-k="${k}" class="${k==cur?'on':''}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>${n}</button>`).join('');
+$('nav').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.k)};
+function show(k){if(k!==cur)H();cur=k;document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id=='s-'+k));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.k==k));
+ if(tg){k=='home'?tg.BackButton.hide():tg.BackButton.show()}render();if(k=='alerts'&&!SIGS)loadSigs();if(k=='pos'&&pseg=='history')loadHist();window.scrollTo({top:0,behavior:'smooth'})}
+if(tg)tg.BackButton.onClick(()=>{if(cur=='more'&&tokOpen){tokOpen=false;$('tok').innerHTML='';$('q').value='';return}show('home')});
+// ---- header ----
+function hdr(){const h=DESK&&DESK.health;const el=$('live');if(!h){el.className='live';el.lastChild.textContent='Connecting…';return}
+ const a=h.last_scan_age_s==null?null:h.last_scan_age_s+(Date.now()-fetchedAt)/1000;const bad=a!=null&&a>1800;el.className='live'+(bad?' bad':'');el.lastChild.textContent=a==null?'Live · starting':(bad?'Stale · ':'Live · ')+ago(a);el.title='Last completed scan '+(h.last_scan||'–');
+ $('hsub').textContent=`${usd0(S.start)} · ${usd0(S.risk)}/trade (${(S.risk/S.start*100).toFixed(S.risk/S.start*100%1?1:0)}%)`;
+ const n=(h.notes||[]).slice();if(DESK.stale)n.unshift({level:'warn',text:'Showing the last saved data: the database did not answer just now.'});
+ $('banner').innerHTML=n.map(x=>`<div class="banner ${x.level}"><span>${x.level=='bad'?'⛔':'⚠️'}</span><span>${esc(x.text)}</span></div>`).join('')}
+setInterval(()=>{if(DESK)hdr()},20000);
+// ---- cards ----
+function ddPct(b){const peak=S.start+D(b.max_dd_peak_r||0);return peak>0?D(b.max_dd_r)/peak*100:0}
+function eqCard(b,o){const ch=b.equity_r,pc=pct(ch),bal=b.realized_r;const tiles=`<div class="tiles"><div class="tile"><span>Win rate</span><b>${b.win_rate==null?'–':b.win_rate+'%'}</b></div><div class="tile"><span>Avg R</span><b>${sR(b.avg_r)}</b></div><div class="tile"><span>Max DD</span><b>${ddPct(b).toFixed(2)}%</b></div>
+ <div class="tile"><span>Open</span><b>${b.open}${b.pending?` <span class="muted">+${b.pending}</span>`:''}</b></div><div class="tile"><span>Closed</span><b>${b.closed}</b></div><div class="tile"><span>Balance</span><b>${S.unit=='r'?sR(bal,1):usd(S.start+D(bal),false)}</b></div></div>`;
+ let dl='';if(o.detail){const rl=b.realized_r;dl=`<div class="dl">${o.rule?`<div><span>Stop rule</span><b>${esc(o.rule)}</b></div>`:''}<div><span>Since</span><b>${b.since?wat(b.since,{year:'numeric'}):'–'}</b></div>
+ <div><span>Realized</span><b class="${cls(rl)}">${usd(D(rl))} · ${fmtR(rl,1)} · ${(pct(rl)>0?'+':'')+pct(rl).toFixed(2)}%</b></div><div><span>Unrealized (open)</span><b class="${cls(b.unrealized_r)}">${usd(D(b.unrealized_r))} · ${fmtR(b.unrealized_r,1)}</b></div>
+ <div><span>Expectancy</span><b class="${cls(b.expectancy_r)}">${fmtR(b.expectancy_r,3)} · ${usd(D(b.expectancy_r))}/trade</b></div><div><span>Avg win / avg loss</span><b><span class="pos">${fmtR(b.avg_win_r)}</span> / <span class="neg">${fmtR(b.avg_loss_r)}</span></b></div>
+ <div><span>Profit factor</span><b>${b.profit_factor==null?'–':b.profit_factor==999?'∞':b.profit_factor}</b></div><div><span>Max DD</span><b>${ddPct(b).toFixed(2)}% · ${usd(D(b.max_dd_r),false)} · ${fmtR(b.max_dd_r,1)}</b></div>
+ <div><span>Last 7 days (closed)</span><b class="${cls(b.last7_r)}">${fmtR(b.last7_r,1)} · ${usd(D(b.last7_r))}</b></div><div><span>Open in profit</span><b>${b.open_in_profit} of ${b.open}</b></div></div>`}
+ return `<div class="card"${o.go?` onclick="${o.go}" style="cursor:pointer"`:''}><div class="eqh"><div style="min-width:0"><b class="t"><span class="dot" style="background:${o.color}"></span>${o.title}</b>${o.badge||''}<div class="muted" style="margin-top:3px">${esc(o.sub||'')}</div></div><span class="pill ${cls(pc)}">${(pc>0?'+':pc<0?MINUS:'')+Math.abs(pc).toFixed(2)}%</span></div>
+ <div class="eqrow"><div><div class="k">Equity</div><div class="v">${eqv(ch)}</div></div><div class="rt"><span class="${cls(b.realized_r)}">${amt(b.realized_r,1)}</span> realized<br><span class="${cls(b.unrealized_r)}">${amt(b.unrealized_r,1)}</span> open</div></div>
+ ${chart(b.series,o.detail?80:64)}${tiles}${dl}</div>`}
+function bar(r){const risk=(r.risk_frac||0)*r.entry,sd=r.direction=='long'?1:-1;let T=r.tp!=null&&risk?sd*(r.tp-r.entry)/risk:null,lab=T?'TP '+(+T.toFixed(1))+'R':'trail';
+ const lr=r.live_r??0;if(!T)T=Math.max(3,lr*1.15);const lo=-1,hi=T,cl=v=>Math.max(0,Math.min(100,(v-lo)/(hi-lo)*100)),e=cl(0),x=cl(lr);
+ const stopR=r.init_stop!=null&&risk?sd*(r.sl-r.entry)/risk:null;
+ return `<div class="prog" style="--e:${e}%"><div class="f" style="left:${Math.min(e,x)}%;width:${Math.abs(x-e)}%;background:${lr>=0?'var(--g)':'var(--r)'}"></div><div class="e" style="left:${e}%"></div>${stopR!=null&&stopR>-1?`<div class="s" style="left:${cl(stopR)}%" title="trailing stop"></div>`:''}${r.price_now!=null?`<div class="kn ${lr<0?'n':''}" style="left:${x}%"></div>`:''}</div>
+ <div class="pl"><span>SL</span><span class="pe" style="left:${e}%">entry</span><span>${lab}</span></div>`}
+function posCard(r){const t=r.strategy_status||'retired',live=r.live_net_r;const right=r.status=='pending'?`<b class="muted" style="font-size:14px">pending</b><small class="muted">${wat(r.created_at)}</small>`:live==null?'<b class="muted">–</b><small class="muted">no price</small>':`<b class="${cls(live)}">${fmtR(live)}</b><small class="${cls(live)}">${usd(D(live))}</small>`;
+ return `<div class="pc" data-sym="${esc(r.symbol)}"><div class="top"><div class="bl"><span class="sym">${esc(r.symbol.replace(/USDT$/,''))}</span>${dirB(r.direction)}${tierB(t)}${stB(r.strategy_short||r.strategy)}</div><div class="rr">${right}</div></div>
+ <div class="lv3"><div><span>Entry</span><b>${px(r.entry)}</b></div><div><span>${r.kind=='don20'?'Trail stop':'Stop'}</span><b class="neg">${px(r.sl)}</b></div><div><span>Target</span><b class="pos">${r.tp==null?'trail':px(r.tp)}</b></div><div><span>Now</span><b>${px(r.price_now)}</b></div></div>
+ ${r.status=='open'?bar(r):`<div class="muted">Target ${r.tp==null?'trail':px(r.tp)} · ${r.rr?'1:'+(+r.rr).toFixed(1):''} · waiting for the entry to fill</div>`}</div>`}
+const rrS=r=>r.rr?'1:'+(+(+r.rr).toFixed(2)):(r.tp==null?'trail':'–');
+const effK=r=>r.strategy_key||(r.kind=='don20'?'DON20':(r.strategy=='FVG'&&String(r.tags||'').includes('FVG-D1')?'FVG-D1':(r.strategy||'FVG')));
+const tierOf=k=>(LST[k]||{}).status||'retired',shortOf=k=>(LST[k]||{}).short||k;
+function sigCard(r){const k=effK(r),t=r.tier||r.strategy_status||tierOf(k),open=r.status=='open';
+ const res=r.net_r!=null?`<span class="${cls(r.net_r)}">${fmtR(r.net_r)}</span><div class="muted" style="font-size:11px">${usd(D(r.net_r))}</div>`:open&&r.live_net_r!=null?`<span class="${cls(r.live_net_r)}">${fmtR(r.live_net_r)}</span><div class="muted" style="font-size:11px">live · ${usd(D(r.live_net_r))}</div>`:`<span class="pill">${esc(r.status)}</span>`;
+ const why=Array.isArray(r.reasons)?r.reasons.join('\n'):(r.reasons||'');
+ return `<div class="sig t-${t}" data-sym="${esc(r.symbol)}"><div class="top"><div class="bl" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b style="font-size:16px">${esc(r.symbol)}</b>${dirB(r.direction)}</div>${tierB(t)}</div>
+ <div class="lv"><div><span>Entry</span><b>${px(r.entry)}</b></div><div><span>Stop</span><b class="neg">${px(r.sl)}</b></div><div><span>Target</span><b class="pos">${r.tp==null?'trail':px(r.tp)}</b></div><div><span>R:R</span><b>${rrS(r)}</b></div></div>
+ <div class="foot"><div>🧭 <b style="color:var(--tx)">${esc(r.short||r.strategy_short||shortOf(k))}</b> · ${esc(r.market||'')}${r.confidence?' · win prob '+r.confidence+'%':''}<br>🕒 ${wat(r.confirm_time||r.filled_at||r.created_at)}${r.id?' · #'+r.id:''}${why?' · tap for reasons':''}</div><div class="res">${res}</div></div>${why?`<div class="why">${esc(why)}</div>`:''}</div>`}
+// ---- views ----
+const tierSub=t=>(DESK.tiers[t].strategies||[]).map(shortOf).join(' · ');
+function vHome(){const d=DESK,T=d.total,ch=T.equity_r,pc=pct(ch),ns=Object.keys(d.strategies).length,op=d.positions.open;
+ let h=`<div class="card hero"><div class="k">Total equity · ${ns} strategies</div><div class="v big">${eqv(ch)}</div>
+ <div class="pills"><span class="pill ${cls(ch)}">${ch>=0?'▲':'▼'} ${S.unit=='r'?usd(D(ch)):fmtR(ch,1)} · ${(pc>0?'+':pc<0?MINUS:'')+Math.abs(pc).toFixed(2)}%</span><span class="pill">${T.open} open</span>${T.pending?`<span class="pill">${T.pending} pending</span>`:''}<span class="pill acc" onclick="show('more')">${usd0(S.risk)}/trade · ${(S.risk/S.start*100).toFixed(S.risk/S.start*100%1?1:0)}%</span></div>
+ ${chart(T.series,150,{w:2.4,axis:1})}
+ <div class="tiles"><div class="tile"><span>Realized</span><b class="${cls(T.realized_r)}">${amt(T.realized_r,1)}</b><span>${alt(T.realized_r,1)}</span></div><div class="tile"><span>Unrealized</span><b class="${cls(T.unrealized_r)}">${amt(T.unrealized_r,1)}</b><span>${alt(T.unrealized_r,1)}</span></div><div class="tile"><span>Start</span><b>${usd0(S.start)}</b><span>${usd0(S.risk)} / trade</span></div></div>
+ <div class="muted" style="margin-top:10px">${T.closed} closed · win ${T.win_rate??'–'}% · PF ${T.profit_factor??'–'} · max DD ${ddPct(T).toFixed(1)}% · fixed ${usd0(S.risk)} per trade, no compounding, after fees</div></div>`;
+ h+=`<h2>Tiers <a onclick="show('pnl')">Details ›</a></h2><div class="g2">`+['primary','secondary'].map(t=>eqCard(d.tiers[t],{title:TL[t],color:COL[t],sub:tierSub(t),go:"show('pnl')"})).join('')+'</div>';
+ h+=`<h2>Strategies <a onclick="show('pnl')">Details ›</a></h2><div class="g2">`+Object.values(d.strategies).map(s=>eqCard(s,{title:esc(s.short),color:COL[s.key]||'#888',badge:' '+tierB(s.tier)+(s.paused?' <span class="pill">paused</span>':''),sub:(LST[s.key]||{}).stop||'',go:"show('pnl')"})).join('')+'</div>';
+ h+=`<h2>Top positions <a onclick="show('pos')">All ${op.length} ›</a></h2><div class="pcg">${op.slice(0,4).map(posCard).join('')||'<div class="empty">No open trades</div>'}</div>`;
+ const A=d.alerts||{};h+=`<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><div class="k">🔔 Telegram alerts</div><b>${esc(d.alert_label||'–')}</b></div><button class="chip" onclick="show('alerts')">${APP?'Change':'View'}</button></div>`;
+ h+=bt();const hh=d.health;h+=`<p class="muted" style="text-align:center">🔄 last scan ${esc(hh.last_scan||'–')}${hh.sessions&&hh.sessions.length?' · '+esc(hh.sessions.join(', ')):''} · data cached ${d.cached_s}s</p>`;$('s-home').innerHTML=h}
+function bt(){const b=DESK.backtest;if(!b||!b.strategies)return'';const E=Object.entries(b.strategies).filter(([k,v])=>v.status!='retired'&&v.total);if(!E.length)return'';
+ return `<h2>🧪 Monthly backtest <span class="muted" style="text-transform:none;letter-spacing:0">${wat(b.generated)} · ${b.window_days}d</span></h2><div class="card"><table><tr><th>Strategy</th><th>n</th><th>Win</th><th>Net R</th><th>$</th></tr>`+
+  E.map(([k,v])=>`<tr><td>${v.status=='primary'?'⭐':'🔷'} ${esc(shortOf(k))}</td><td>${v.total.n}</td><td>${v.total.win??'–'}%</td><td>${sR(v.total.net_r,1)}</td><td class="${cls(v.total.net_r)}">${usd(D(v.total.net_r))}</td></tr>`).join('')+'</table></div>'}
+function vPos(){const P=DESK.positions,op=P.open,pe=P.pending;$('pseg').innerHTML=[['open','Open · '+op.length],['pending','Pending · '+pe.length],['history','History']].map(([k,n])=>`<button data-k="${k}" class="${k==pseg?'on':''}">${n}</button>`).join('');
+ if(pseg=='history'){vHist();return}const L=pseg=='open'?op:pe,cnt={};L.forEach(r=>cnt[r.strategy]=(cnt[r.strategy]||0)+1);
+ const ch=[['all','All · '+L.length],['primary','⭐ Primary'],['secondary','🔷 Secondary']].concat(Object.keys(DESK.strategies).filter(k=>cnt[k]).map(k=>[k,shortOf(k)+' · '+cnt[k]]));if(!ch.find(c=>c[0]==pfil))pfil='all';
+ const F=L.filter(r=>pfil=='all'||r.strategy_status==pfil||r.strategy==pfil),tot=F.reduce((a,r)=>a+(r.live_net_r||0),0);
+ $('pbody').innerHTML=`${pseg=='open'?`<div class="bar2" style="margin:2px 4px 8px"><div><div class="k">Open PnL · ${F.length} trades</div><div class="muted">${F.filter(r=>(r.live_net_r||0)>0).length} in profit · net of fees · price cached 60s</div></div><div style="text-align:right"><div class="sum ${cls(tot)}" style="font-size:18px">${amt(tot,1)}</div><div class="muted">${alt(tot,1)}</div></div></div>`:''}
+ <div class="tabs" id="pchips">${ch.map(([k,n])=>`<button class="chip ${k==pfil?'on':''}" data-f="${k}">${esc(n)}</button>`).join('')}</div>
+ <div class="pcg">${F.slice(0,pfil=='all'?150:300).map(posCard).join('')||'<div class="empty">Nothing here.</div>'}</div>${F.length>150&&pfil=='all'?`<p class="muted">Showing the top 150 of ${F.length}. Use a filter to see the rest.</p>`:''}`}
+$('pseg').onclick=e=>{const b=e.target.closest('button');if(b){pseg=b.dataset.k;H();vPos();if(pseg=='history')loadHist()}};
+$('pbody').onclick=e=>{const b=e.target.closest('button[data-f]');if(b){pfil=b.dataset.f;H();vPos();return}const s=e.target.closest('button[data-s]');if(s){hst=s.dataset.s;H();loadHist();return}const p=e.target.closest('button[data-p]');if(p){hper=p.dataset.p;H();loadHist()}};
+const HST=[['closed','🏁 Closed'],['new','🆕 New'],['retired','🗄 Retired']],HPER=[['day','Day'],['week','Week'],['month','Month'],['all','All time']];
+function vHist(){$('pbody').innerHTML=`<div class="tabs">${HST.map(([k,n])=>`<button class="chip ${k==hst?'on':''}" data-s="${k}">${n}</button>`).join('')}</div><div class="tabs">${HPER.map(([k,n])=>`<button class="chip ${k==hper?'on':''}" data-p="${k}">${n}</button>`).join('')}</div><div id="hsum" class="muted" style="margin:0 4px"></div><div id="hlist" class="pcg"><div class="skel"></div></div>`}
+async function loadHist(){if(pseg!='history')return;vHist();try{const d=await J(`${EP.trades}?state=${hst}&period=${hper}`);const x=[`<b>${d.count}</b> ${hst}`];if(hst!='new')x.push('net '+sR(d.closed_net_r)+' · '+`<span class="${cls(d.closed_net_r)}">${usd(D(d.closed_net_r))}</span>`);if(d.closed_win!=null)x.push('win '+d.closed_win+'%');
+ if($('hsum')){$('hsum').innerHTML=x.join(' · ');$('hlist').innerHTML=d.rows.slice(0,120).map(sigCard).join('')||'<div class="empty">Nothing here for this period.</div>'}}catch(e){$('hlist')&&($('hlist').innerHTML=ERR(e))}}
+function vAlerts(){const A=DESK.alerts||{};$('amode').innerHTML=`<div class="card"><div class="k">🔔 Telegram alert mode</div>${APP&&A.modes?`<div class="mode">${A.modes.map(m=>`<button class="${m==A.mode?'on':''}" onclick="setMode('${m}')">${esc(A.mode_labels[m])}</button>`).join('')}</div>`:`<div class="v" style="font-size:17px;margin-top:4px">${esc(DESK.alert_label||'–')}</div>`}
+ <div class="muted" style="margin-top:8px">Signals outside the mode are still saved and tracked.${APP?'':' Change it in Telegram: /alerts or the Mini App.'} PnL summary every 6 hours.</div></div>`;
+ const F=DESK.alerts_feed||[],sent=F.filter(r=>r.sent).length;$('acount').textContent=`${sent} sent · ${F.length-sent} tracked only`;
+ $('afeed').innerHTML=F.map(r=>{const t=r.strategy_status||'retired',res=r.net_r!=null?`<b class="${cls(r.net_r)}">${fmtR(r.net_r)}</b>`:r.live_net_r!=null?`<b class="${cls(r.live_net_r)}">${fmtR(r.live_net_r)}</b> <span class="muted">live</span>`:`<span class="pill">${esc(r.status)}</span>`;
+  return `<div class="al" data-sym="${esc(r.symbol)}"><div class="ic">${r.sent?'🔔':'🔕'}</div><div class="m"><b>${esc(r.symbol.replace(/USDT$/,''))}</b> ${dirB(r.direction)} ${tierB(t)} ${stB(r.strategy_short||r.strategy)}<div class="muted">${wat(r.created_at)} · entry ${px(r.entry)} · stop ${px(r.sl)}${r.tp!=null?' · TP '+px(r.tp):''}</div></div><div class="x">${res}<div class="muted">${r.sent?'sent':'not sent'}</div></div></div>`}).join('')||'<div class="empty">No alerts in the last 7 days.</div>';
+ const TI=[['','All live'],['primary','⭐ Primary'],['secondary','🔷 Secondary']];$('stiers').innerHTML=TI.map(([k,n])=>`<button class="chip ${k==stier?'on':''}" data-t="${k}">${n}</button>`).join('');
+ if(!$('ssg').dataset.f){$('ssg').innerHTML='<option value="">all</option>'+DESK.listing.filter(x=>x.status!='retired').map(x=>`<option value="${x.key}">${x.status=='primary'?'⭐':'🔷'} ${esc(x.short)}</option>`).join('');$('ssg').dataset.f=1}
+ rSigs()}
+async function setMode(m){H();try{const a=await J('/app/api/alerts',{method:'POST',body:JSON.stringify({mode:m})});H('success');DESK.alerts=Object.assign(DESK.alerts||{},a);DESK.alert_label=a.mode_label;vAlerts()}catch(err){H('error');alert('Could not change: '+err.message)}}
+$('stiers').onclick=e=>{const b=e.target.closest('button');if(b){stier=b.dataset.t;H();vAlerts()}};['smk','sst','ssg'].forEach(i=>$(i).onchange=rSigs);$('sdays').onchange=()=>{SIGS=null;loadSigs()};
+async function loadSigs(){$('slist').innerHTML='<div class="skel"></div>';try{SIGS=await J(EP.signals($('sdays').value));rSigs()}catch(e){$('slist').innerHTML=ERR(e)}}
+function rSigs(){if(!SIGS)return;const mk=$('smk').value,ss=$('sst').value,g=$('ssg').value;const L=SIGS.filter(r=>{const k=effK(r),t=r.tier||tierOf(k);return t!='retired'&&(!stier||t==stier)&&(!mk||r.market==mk)&&(!ss||r.status==ss)&&(!g||k==g)});
+ $('slist').innerHTML=L.slice(0,120).map(sigCard).join('')||'<div class="empty">📭 No live signals for this filter.</div>'}
+function vPnl(){const d=DESK;let h=`<h2>Tiers</h2><div class="g2">`+['primary','secondary'].map(t=>eqCard(d.tiers[t],{title:TL[t],color:COL[t],sub:tierSub(t),detail:1})).join('')+'</div>';
+ for(const t of ['primary','secondary']){h+=`<h2>${TL[t]} strategies</h2><div class="g2">`+Object.values(d.strategies).filter(s=>s.tier==t).map(s=>eqCard(s,{title:esc(s.short),color:COL[s.key]||'#888',sub:s.name,rule:(LST[s.key]||{}).stop,detail:1,badge:s.paused?' <span class="pill">paused</span>':''})).join('')+'</div>'}
+ $('s-pnl').innerHTML=h+`<p class="muted">Each strategy card is that strategy alone on a ${usd(S.start,false)} account risking ${usd(S.risk,false)} a trade (fixed, no compounding). Tier and total cards add the strategies together. Net R is after fees; open PnL uses the latest price (cached 60s).</p>`}
+function vMore(){if($('s-more').dataset.b){mStatus();return}$('s-more').dataset.b=1;
+ $('s-more').innerHTML=`<h2>Account</h2><div class="card"><div class="muted">Used for every $ figure. Saved on this device only.</div><div class="set"><div><label>Start balance ($)</label><input id="ast" type="number" min="1" step="any" value="${S.start}"></div><div><label>Risk per trade ($)</label><input id="ark" type="number" min="0.01" step="any" value="${S.risk}"></div></div>
+ <div class="set"><div><label>Show amounts in</label><div class="mode" style="margin-top:4px"><button data-u="usd" class="${S.unit=='usd'?'on':''}">$ dollars</button><button data-u="r" class="${S.unit=='r'?'on':''}">R multiples</button></div></div><div><label>Theme</label><div class="mode" style="margin-top:4px;grid-template-columns:1fr 1fr 1fr"><button data-th="auto" class="${S.theme=='auto'?'on':''}">Auto</button><button data-th="dark" class="${S.theme=='dark'?'on':''}">Dark</button><button data-th="light" class="${S.theme=='light'?'on':''}">Light</button></div></div></div>
+ <div style="display:flex;gap:8px;margin-top:12px;align-items:center"><button class="btn" id="asv">Save</button><span class="muted" id="apc"></span></div></div>
+ <h2>🔎 Token lookup</h2><div style="display:flex;gap:8px"><input id="q" placeholder="BTC, SOLUSDT, EURUSD…" autocapitalize="characters"><button class="btn" id="go">Go</button></div><div id="tok"></div>
+ <h2>Strategies by tier</h2><div class="card" id="mlist" style="padding:4px 14px"></div><div id="mbt"></div><h2>System</h2><div class="card" id="msys"></div>
+ <p class="muted">⭐ PRIMARY and 🔷 SECONDARY are the two live tiers. Retired strategies post nothing new and their history is kept. Pending means the signal fired but the limit entry hasn't filled yet. Net R is after fees. Educational tool, not financial advice.</p>`;
+ const pcU=()=>{const a=+$('ast').value,b=+$('ark').value;$('apc').textContent=a>0&&b>0?`= ${(b/a*100).toFixed(2)}% of the start balance per trade`:''};$('ast').oninput=pcU;$('ark').oninput=pcU;pcU();
+ $('s-more').onclick=e=>{const u=e.target.closest('button[data-u]');if(u){S.unit=u.dataset.u;saveS();H();$('s-more').querySelectorAll('[data-u]').forEach(b=>b.classList.toggle('on',b==u));hdr();return}const t=e.target.closest('button[data-th]');if(t){S.theme=t.dataset.th;saveS();applyTheme();H();$('s-more').querySelectorAll('[data-th]').forEach(b=>b.classList.toggle('on',b==t))}};
+ $('asv').onclick=()=>{const a=+$('ast').value,b=+$('ark').value;if(!(a>0&&b>0)){alert('Enter a start balance and risk above 0');return}S.start=a;S.risk=b;saveS();H('success');hdr();$('apc').textContent='Saved ✓'};
+ $('go').onclick=lookup;$('q').onkeydown=e=>{if(e.key=='Enter'){e.target.blur();lookup()}};mStatus()}
+function mStatus(){const d=DESK,A=d.alerts||{},T=A.table||{};
+ $('mlist').innerHTML=['primary','secondary','retired'].map(t=>d.listing.filter(x=>x.status==t).map(x=>{const s=d.strategies[x.key],p=T[x.key]||{};return `<div class="sl"><div style="min-width:0"><b>${esc(x.short)}</b> ${tierB(t)}${p.profitable?' <span class="pill pos">💰 profitable</span>':''}${x.paused?' <span class="pill">paused</span>':''}<div class="muted">${esc(x.name)}${x.stop&&x.stop!='strategy rules'&&t!='retired'?' · stop: '+esc(x.stop):''}</div></div><div style="text-align:right;flex:none">${s?sR(s.realized_r,1)+`<div class="muted">${s.closed} closed</div>`:'<span class="muted">retired</span>'}</div></div>`}).join('')).join('');
+ $('mbt').innerHTML=bt();const h=d.health;
+ $('msys').innerHTML=`<div class="dl" style="margin:0"><div><span>Last scan</span><b>${esc(h.last_scan||'–')} (${ago(h.last_scan_age_s)} ago)</b></div><div><span>Scan every</span><b>${h.scan_minutes} min</b></div><div><span>Sessions</span><b>${esc((h.sessions||[]).join(', ')||'none')}</b></div>
+ <div><span>Scanner leader</span><b>${h.leader?'yes':h.leader===false?'no':'–'}</b></div><div><span>DB errors (1h)</span><b class="${h.db_errors_1h?'neg':''}">${h.db_errors_1h}${h.db_quota_errors_1h?' · '+h.db_quota_errors_1h+' quota':''}</b></div><div><span>Scan errors (recent)</span><b>${h.scan_errors}</b></div><div><span>Data as of</span><b>${wat(d.as_of)}</b></div></div>`}
+async function lookup(){const q=$('q').value.trim();if(!q)return;tokOpen=true;$('tok').innerHTML='<div class="skel"></div>';
+ try{const d=await J(EP.token(encodeURIComponent(q)));const s=d.summary;$('tok').innerHTML=`<div class="g2" style="margin-top:6px"><div class="card"><div class="k">${esc(s.symbol)} closed</div><div class="v">${sR(s.net_r)}</div><div class="muted">${usd(D(s.net_r))} · ${s.closed} closed · win ${s.win_rate??'–'}%</div></div><div class="card"><div class="k">Open live</div><div class="v">${sR(s.open_live_net_r)}</div><div class="muted">${usd(D(s.open_live_net_r))} · ${s.open} open · ${s.pending} pending</div></div></div>`+(d.trades.length?d.trades.map(sigCard).join(''):'<div class="empty">No trades for this token yet.</div>');H('success')}catch(e){$('tok').innerHTML=ERR(e)}}
+document.addEventListener('click',e=>{const w=e.target.closest('.sig');if(w&&w.querySelector('.why')&&!e.target.closest('#tok')){w.classList.toggle('x');return}
+ const r=e.target.closest('[data-sym]');if(r&&!e.target.closest('#tok')&&!e.target.closest('button')){H();show('more');$('q').value=r.dataset.sym;lookup();setTimeout(()=>$('q').scrollIntoView({behavior:'smooth',block:'start'}),60)}});
+function render(){if(!DESK)return;hdr();try{({home:vHome,pos:vPos,alerts:vAlerts,pnl:vPnl,more:vMore})[cur]()}catch(e){console.error(e);$('s-'+cur).insertAdjacentHTML('afterbegin',ERR(e))}}
+async function load(force){const b=$('rfb');b.classList.add('spin');try{DESK=await J(EP.desk);fetchedAt=Date.now();DESK.listing.forEach(x=>LST[x.key]=x);render();if(force&&cur=='alerts'){SIGS=null;loadSigs()}if(force&&cur=='pos'&&pseg=='history')loadHist()}
+ catch(e){if(!DESK){$('s-home').innerHTML=ERR(e);$('live').className='live bad';$('live').lastChild.textContent=APP?'Not authorised':'Offline'}else hdr()}finally{b.classList.remove('spin')}}
+$('rfb').onclick=()=>{H();load(true)};$('thb').onclick=()=>{S.theme=S.theme=='auto'?(matchMedia('(prefers-color-scheme: light)').matches&&!APP?'dark':'light'):S.theme=='light'?'dark':'auto';saveS();applyTheme();H()};
+let y0=null,pull=0;addEventListener('touchstart',e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
+addEventListener('touchmove',e=>{if(y0==null)return;pull=Math.max(0,e.touches[0].clientY-y0);$('ptr').style.height=Math.min(pull/2,40)+'px';$('ptr').textContent=pull>110?'↻ release to refresh':'↓ pull to refresh'},{passive:true});
+addEventListener('touchend',()=>{if(pull>110){H();load(true)}pull=0;y0=null;$('ptr').style.height='0'});
+setInterval(()=>{if(!document.hidden&&!(cur=='more'&&document.activeElement&&document.activeElement.tagName=='INPUT'))load()},60000);
+load();
+</script></body></html>

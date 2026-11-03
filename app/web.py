@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from pathlib import Path
 from . import config as C, db, scanner, telegram, ai, summary, don20
 app = FastAPI(title="FVG Signal Bot")
+from fastapi.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=2000)   # /api/desk is ~200KB of JSON
 from .webapp import router as _miniapp
 app.include_router(_miniapp)   # Telegram Mini App: /app + owner-only /app/api/*
 @app.on_event("startup")
@@ -15,8 +17,17 @@ def _start():
     if C.ENABLE_SCHEDULER: scanner.start()
 @app.on_event("shutdown")
 def _stop(): db.release_lease()
+def desk_page(mode):
+    """Shared desk UI (desk.html) for the public dashboard (mode=web) and the Telegram Mini App (mode=app). Static shell, no data."""
+    h = (Path(__file__).parent / "desk.html").read_text().replace("__MODE__", mode)
+    if mode != "app": h = h.replace('<script src="https://telegram.org/js/telegram-web-app.js"></script>', "")
+    return HTMLResponse(h, headers={"Cache-Control": "no-cache"})
 @app.get("/", response_class=HTMLResponse)
-def home(): return (Path(__file__).parent / "dashboard.html").read_text()
+def home(): return desk_page("web")
+@app.get("/api/desk")
+def desk_api():
+    """Equity (R), per-tier/strategy stats, positions with live price, recent alerts, health. Cached 60s server-side."""
+    from . import desk; return desk.get()
 def tier_rows(days, tier):
     """Signals of one tier (primary|secondary|profitable), with DON20 positions included when the tier covers DON20."""
     from . import alerts, strategies as SG, trades

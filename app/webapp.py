@@ -44,7 +44,12 @@ def app_url(): return (C.PUBLIC_URL.rstrip("/") + "/app") if C.PUBLIC_URL else N
 
 @router.get("/app", response_class=HTMLResponse)
 def page():   # static shell only; all data comes from /app/api/* with initData
-    return HTMLResponse((Path(__file__).parent / "miniapp.html").read_text(), headers={"Cache-Control": "no-cache"})
+    from .web import desk_page; return desk_page("app")
+
+@router.get("/app/api/desk")
+def app_desk(request: Request):
+    auth(request)
+    from . import desk; return desk.get()
 
 @router.get("/app/api/me")
 def me(request: Request):
