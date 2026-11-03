@@ -13,14 +13,17 @@ PAT_STRATS = ("PAT-WEDGE", "PAT-TRIPLE", "PAT-TRIPLE-C", "PAT-CUP", "BRK")
 FVG_FAMILY = ("FVG", "FVG-D1", "FVG-PLAN", "FVG+TREND")
 def fvg_trend(sig, m5):
     """FVG+TREND row: same setup/entry as FVG; stop beyond the last closed 1h candle (provisional now, final at the fill), 3R."""
-    c = V.c60_stop(m5, m5.t.iloc[-1], sig["direction"], sig["entry"])
+    c = V.c60_stop(m5, m5.t.iloc[-1], sig["direction"], sig["entry"]) if m5 is not None and len(m5) else None   # no LTF bars: signal stop
     sl, tp = V.levels(sig["entry"], c if c is not None else sig["sl"], sig["direction"], sig["market"])
     return dict(sig, strategy="FVG+TREND", tags=["FVG+TREND"], experimental=0, sl=sl, tp=tp, rr=V.RR, orig_sl=sig["sl"], stop_mode="c60",
                 reasons=["FVG+TREND [🔷 SECONDARY]"] + sig["reasons"][1:] + ["Stop: beyond the last closed 1h candle at the fill (−/+0.1 ATR), min 0.3%; SL/TP are re-set when the limit fills; target 3R"])
 def patterns_for(data, market, found, budget_end):
     """PAT-*/BRK on the already-fetched closed 4H candles (no extra downloads). Max PAT_MAX_PER_SCAN per strategy."""
     if not (C.ENABLE_PAT or C.ENABLE_BRK): return
-    from . import patterns_live as PL
+    from . import patterns_live as PL, candles21 as K
+    if not STATE.get("candle_filters"):
+        STATE["candle_filters"] = sorted(f"{k[0]} {k[1]}" for k in K.RULES if K.active(*k))
+        print(f"[candles21] opposite-candle filters active: {', '.join(STATE['candle_filters']) or 'none'}", flush=True)
     got = {}
     for s, v in data.items():
         if time.time() > budget_end: STATE["errors"].append(f"patterns {market}: time budget hit"); break
@@ -36,7 +39,10 @@ def patterns_for(data, market, found, budget_end):
             _PAT_DONE.add(key)
         except Exception as e: STATE["errors"].append(f"patterns {s}: {e}")
     if len(_PAT_DONE) > C.PAT_DONE_MAX: _PAT_DONE.clear()   # ~1 key per symbol per 4H bar; bounded
-    for k, L in got.items(): found.extend(L[:max(0, C.PAT_MAX_PER_SCAN - sum(g.get("strategy") == k for g in found))])   # cap per strategy per whole scan
+    for k, L in got.items():
+        ok = [g for g in L if g.get("status") != "filtered"]   # candles21-filtered rows: saved as 'filtered', never posted, outside the cap
+        found.extend(ok[:max(0, C.PAT_MAX_PER_SCAN - sum(g.get("strategy") == k and g.get("status") != "filtered" for g in found))])   # cap per strategy per whole scan
+        found.extend(g for g in L if g.get("status") == "filtered")
     STATE.setdefault("pat_counts", {})[market] = {k: len(L) for k, L in got.items()}
 
 def qualifies(sig):
@@ -138,9 +144,14 @@ def scan(crypto=True, fx=True, post=True, gen=None):
     found = [g for g in found if qualifies(g)]   # filtered signals are not saved, so dashboard/stats match what is posted
     found, thin = binance.liquid(found)   # crypto liquidity floor (MIN_CRYPTO_VOL_USD, 24h quote volume); forex untouched
     if thin: STATE["skipped_low_volume"] = thin[-20:]
+    filtered = []
     for sig in found:
         i = db.insert(sig)
-        if i: new.append(db.get(i))
+        if not i: continue
+        if sig.get("status") == "filtered":   # saved for the record (desk 'not sent' list); no Telegram post, no outcome tracking
+            filtered.append(i); print(f"[candles21] #{i} {sig['strategy']} {sig['symbol']} {sig['direction']} filtered: {sig['reasons'][-1]}", flush=True)
+        else: new.append(db.get(i))
+    if filtered: STATE["candle_filtered"] = (STATE.get("candle_filtered") or []) [-50:] + filtered
     if post:   # one Telegram post per setup: FVG + FVG-PLAN rows from the same setup are posted together
         groups = {}
         for s in new: groups.setdefault((s["symbol"], s["confirm_time"], s["strategy"] in FVG_FAMILY), []).append(s)
@@ -159,7 +170,7 @@ def scan(crypto=True, fx=True, post=True, gen=None):
     except Exception as e: STATE["errors"].append(f"alerts: {e}")
     STATE["last_scan"] = time.strftime("%Y-%m-%d %H:%M:%S %Z"); STATE["last_scan_ts"] = time.time(); STATE["errors"] = STATE["errors"][-20:]
     STATE["last_counts"] = dict(scanned_crypto=len([k for k in cache if k.endswith("USDT")]),
-        scanned_forex=len([k for k in cache if not k.endswith("USDT")]), candidates=len(found), new=len(new))
+        scanned_forex=len([k for k in cache if not k.endswith("USDT")]), candidates=len(found), new=len(new), candle_filtered=len(filtered))
     print(f"[scan] done in {time.time()-t0:.0f}s {STATE['last_counts']}", flush=True)
     return new
 

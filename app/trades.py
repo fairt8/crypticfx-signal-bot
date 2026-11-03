@@ -110,7 +110,7 @@ def by_state(state, period="all", include_retired=False):
     since = _since(period_days(period)); state = (state or "open").lower()
     keep = (lambda r: True) if include_retired else (lambda r: SG.active(r["strategy"]))
     if state == "retired":
-        rows = [r for r in _sig_rows("WHERE 1=1") + _don_rows() if not SG.active(r["strategy"]) and _in(r["closed_at"] or r["created_at"], since)]
+        rows = [r for r in _sig_rows("WHERE status<>'filtered'") + _don_rows() if not SG.active(r["strategy"]) and _in(r["closed_at"] or r["created_at"], since)]
         rows.sort(key=lambda r: str(_ts(r["created_at"]) or ""), reverse=True); return live(rows)
     if state == "open": return live([r for r in _sig_rows("WHERE status='open'") + _don_rows(" WHERE status='open'") if keep(r)])
     if state == "pending": return [r for r in _sig_rows("WHERE status='pending'") if keep(r) and _in(r["created_at"], since)]
@@ -119,7 +119,7 @@ def by_state(state, period="all", include_retired=False):
         rows = [r for r in rows if keep(r) and _in(r["closed_at"] or r["created_at"], since)]
         rows.sort(key=lambda r: str(_ts(r["closed_at"]) or ""), reverse=True); return rows
     if state == "new":
-        rows = [r for r in _sig_rows("WHERE 1=1") + _don_rows() if keep(r) and _in(r["created_at"], since)]
+        rows = [r for r in _sig_rows("WHERE status<>'filtered'") + _don_rows() if keep(r) and _in(r["created_at"], since)]
         rows.sort(key=lambda r: str(_ts(r["created_at"]) or ""), reverse=True); return live(rows)
     raise ValueError("state must be open|pending|closed|new|retired")
 def retire_close():
@@ -169,7 +169,7 @@ def norm_symbol(s):
     return s
 def history(symbol):
     s = norm_symbol(symbol)
-    rows = live(_sig_rows("WHERE symbol=?", (s,)) + _don_rows(" WHERE symbol=?", (s,)))
+    rows = live(_sig_rows("WHERE symbol=? AND status<>'filtered'", (s,)) + _don_rows(" WHERE symbol=?", (s,)))
     rows.sort(key=lambda r: str(_ts(r["created_at"]) or ""), reverse=True)
     cl = [r for r in rows if r.get("net_r") is not None]
     w = sum(r["result_r"] > 0 for r in cl)

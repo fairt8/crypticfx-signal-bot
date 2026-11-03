@@ -85,6 +85,22 @@ There are only two live tiers. There are no NORMAL or EXPERIMENTAL signals any m
 | 🔷 SECONDARY | FVG+TREND | last closed 1h candle ∓0.1 ATR (set at fill), 3R |
 | 🗄 retired | FVG (old live), PAT-CUP | history kept, no new signals |
 
+### Opposite-candle filters (since 2026-11-03)
+
+BRK and PAT-TRIPLE forex skip **new** signals when a candlestick pattern pointing the other way has just completed. Open trades are not touched. The code is `app/candles21.py`, a verbatim port of the `research/candles21/patterns.py` detectors (the "all" set, including the relaxed `~` gap versions). Only candles that closed at or before the signal's 4H close are used.
+
+| Strategy | Skip the signal when an opposite pattern completes on… | 3-year backtest (same stop / target) |
+|---|---|---|
+| BRK (crypto, current stop, 3R) | the 4H entry candle or the 2 before it, **or** one of the last 3 daily candles | 5117 trades +69.2R → 3286 trades +157.4R (Nov 3 refresh; every year better) |
+| PAT-TRIPLE (forex, current rules) | the last completed daily candle | 165 trades +22.4R → 157 trades +28.9R |
+
+- A skipped signal is saved once with status `filtered` and a reason (pattern, timeframe and close time).
+- It is never posted to Telegram, gets no outcome tracking, and is left out of stats, summaries, `/history` and trade lists.
+- It shows as 🕯 filtered · not sent in the dashboard / Mini App alerts feed.
+- The scan log prints `[candles21] opposite-candle filters active: …` once, plus one line per skipped signal. `last_counts.candle_filtered` counts them per scan.
+- `CANDLE_FILTERS` (env, default `BRK,PAT-TRIPLE`) switches them. Set it to empty to turn both off.
+- Parity: `research/candles21/parity_live.py` runs the live filter on live-sized windows and compares it with the research filter on the full history. On the 3-year trades, BRK filtered 1831/5117 in both and PAT-TRIPLE FX 8/165 (prev_oct30) and 8/167 (out3y) in both, with 0 mismatches.
+
 The stop variants live in `app/variants.py`. They are the same code as the backtest in `research/stop_variants_3r/engine.py`. The crypto stop floor is 0.3%, and the $1M crypto volume floor still applies. Alert modes are `/alerts primary` and `/alerts primary_secondary`. Other commands are `/signals`, `/primary`, `/secondary` and `/stats`. The Mini App is at `/app` (owner only) and the dashboard is at `/`.
 
 Only **crypto FVG setups with raw setup score ≥ `MIN_POST_SCORE` (default 70, env-overridable)** are saved and posted (TP stays 1:3). Forex, CHK and sub-70 crypto FVG setups are dropped before saving, so dashboard/stats match Telegram. FVG+TREND / FVG-PLAN / FVG-D1 experimental tags still ride on qualifying signals. Backtest v3: ~29% win rate, ≈ +0.02R/trade (break-even; paper signals, not an edge).

@@ -61,7 +61,7 @@ def equity(days=30):
     from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc); start = (now - timedelta(days=days-1)).date()
     D = {(start + timedelta(days=i)).isoformat(): {"primary": 0.0, "secondary": 0.0} for i in range(days)}
-    for r in trades._sig_rows("WHERE 1=1") + trades._don_rows():
+    for r in trades._sig_rows("WHERE status<>'filtered'") + trades._don_rows():
         if r.get("net_r") is None: continue
         t = trades._ts(r.get("closed_at")); tier = SG.status(r.get("strategy"))
         if not t or tier not in SG.TIERS: continue

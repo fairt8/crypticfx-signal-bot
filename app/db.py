@@ -86,10 +86,11 @@ def insert(s):
 def exists(symbol, confirm_time, strategy):
     with conn() as c:
         return c.execute("SELECT 1 FROM signals WHERE symbol=? AND confirm_time=? AND strategy=?", (symbol, confirm_time, strategy)).fetchone() is not None
-def recent(days=30, limit=500):
-    since = (datetime.now(timezone.utc)-timedelta(days=days)).isoformat()
+def recent(days=30, limit=500, filtered=False):
+    """Recent signal rows. 'filtered' rows (candles21 filter: saved, never posted/traded) are left out unless filtered=True."""
+    since = (datetime.now(timezone.utc)-timedelta(days=days)).isoformat(); w = "" if filtered else " AND status<>'filtered'"
     with conn() as c:
-        return [row(r) for r in c.execute("SELECT * FROM signals WHERE created_at>=? ORDER BY id DESC LIMIT ?", (since, limit))]
+        return [row(r) for r in c.execute(f"SELECT * FROM signals WHERE created_at>=?{w} ORDER BY id DESC LIMIT ?", (since, limit))]
 def get(i):
     with conn() as c:
         r = c.execute("SELECT * FROM signals WHERE id=?", (i,)).fetchone(); return row(r) if r else None
@@ -149,5 +150,5 @@ def release_lease(name="scheduler"):
 def count_today(symbol, strategy):
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with conn() as c:
-        rs = c.execute("SELECT confirm_time FROM signals WHERE symbol=? AND strategy=?", (symbol, strategy)).fetchall()
+        rs = c.execute("SELECT confirm_time FROM signals WHERE symbol=? AND strategy=? AND status<>'filtered'", (symbol, strategy)).fetchall()
     return sum(1 for r in rs if str(r["confirm_time"]).startswith(day))

@@ -32,8 +32,11 @@ def apply(strategy, sig):
     return s
 
 def h1_candles(m15):
+    """Completed-or-not 1h candles from 15m/5m bars (+ ATR14 'a'). Empty input -> empty frame (no crash)."""
+    if m15 is None or not len(m15): return pd.DataFrame(columns=["o", "h", "l", "c", "t", "ct", "a"])
     x = m15[["t", "o", "h", "l", "c"]].set_index("t").resample("1h", origin="epoch").agg(dict(o="first", h="max", l="min", c="last")).dropna()
     x["t"] = x.index; x["ct"] = x.t + pd.Timedelta("1h"); x = x.reset_index(drop=True)
+    if not len(x): x["a"] = []; return x
     h, l, c = x.h.values, x.l.values, x.c.values; pc = np.r_[c[0], c[:-1]]
     x["a"] = pd.Series(np.maximum(h-l, np.maximum(abs(h-pc), abs(l-pc)))).rolling(14, min_periods=1).mean().values
     return x
@@ -42,6 +45,7 @@ def c60_stop(m15, t_fill, direction, entry):
     """Stop beyond the last 1h candle with close time <= t_fill (fill bar open). None if no candle within 2 days."""
     t_fill = pd.Timestamp(t_fill)
     if t_fill.tzinfo is None: t_fill = t_fill.tz_localize("UTC")
+    if m15 is None or not len(m15): return None   # no candles -> caller falls back to the signal's own stop
     x = h1_candles(m15[m15.t < t_fill])   # only bars before the fill bar -> completed candles, no look-ahead
     x = x[x.ct <= t_fill]
     if not len(x): return None

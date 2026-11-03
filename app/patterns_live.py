@@ -274,8 +274,16 @@ def live_pat(symbol, market, h4, now=None, names=None):
             mode = "retest of the broken level + confirming 4H close"
             stop = "level ∓ 0.5 ATR" if v[4] == "lvl" else "beyond the retest swing + 0.1 ATR"
             why = [f"4H {NICE.get(e['pat'], e['pat'])}: broke {'above' if e['dir']=='long' else 'below'} {e['level']:.6g}, entry on {mode}", f"Stop: {stop}"]
-            out.append(_sig(nm, symbol, market, d, a, e, v[5], v[6], v[7], why))
+            out.append(_candle_filter(_sig(nm, symbol, market, d, a, e, v[5], v[6], v[7], why), nm, market, e, d, h4))
     return out
+def _candle_filter(sig, strategy, market, e, d, h4):
+    """candles21 opposite-pattern filter (BRK crypto, PAT-TRIPLE forex): blocked signals come back with status 'filtered'."""
+    from . import candles21 as K
+    if not K.active(strategy, market): return sig
+    try: why = K.check(strategy, market, e["dir"], h4, d.t.iloc[e["k"]] + pd.Timedelta("4h"))
+    except Exception as x:   # never lose a signal to a filter error
+        print(f"[candles21] {strategy} {sig['symbol']} filter error {type(x).__name__}: {x}", flush=True); return sig
+    return K.mark(sig, why) if why else sig
 def live_brk(symbol, market, h4, now=None):
     from . import config as C
     now = now or pd.Timestamp.now(tz="UTC")
@@ -288,5 +296,6 @@ def live_brk(symbol, market, h4, now=None):
         what = "strong horizontal S/R (2+ body touches)" if e["pat"] == "HORIZ_LEVEL" else f"{NICE.get(e['pat'], e['pat'])} neckline/trendline"
         why = [f"4H close {'above' if e['dir']=='long' else 'below'} {what} at {e['level']:.6g}, volume above 20-bar avg, close in outer 30% of candle",
                "Entry: " + ("immediate (breakout close)" if market == "crypto" else "retest of the level + confirming 4H close"), "Stop: level ∓ 0.5 ATR"]
-        out.append(_sig("BRK", symbol, market, d, a, e, 3.0, BRK_PAT_CONF if pat_only else BRK_CONF[market], BRK_PAT_NOTE if pat_only else BRK_NOTE[market], why))
-    return out[-1:]
+        out.append(_candle_filter(_sig("BRK", symbol, market, d, a, e, 3.0, BRK_PAT_CONF if pat_only else BRK_CONF[market], BRK_PAT_NOTE if pat_only else BRK_NOTE[market], why), "BRK", market, e, d, h4))
+    keep = [s for s in out if s.get("status") != "filtered"][-1:]   # one live BRK per scan (as before), from the unfiltered ones
+    return keep + [s for s in out if s.get("status") == "filtered" and all(s["confirm_time"] != k["confirm_time"] for k in keep)]

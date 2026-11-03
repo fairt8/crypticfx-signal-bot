@@ -1,4 +1,6 @@
-# candles21 — "21 Candlesticks" PDF research (research only, nothing live changed)
+# candles21 — "21 Candlesticks" PDF research
+
+Live since 2026-11-03: the BRK (blk_sig_all_2 + blk_htf_all_2) and PAT-TRIPLE forex (blk_htf_all_0) opposite-pattern blocks run in `app/candles21.py`. See the main README, "Opposite-candle filters".
 
 - `patterns.py` — detectors coded from the PDF:
   - Prior-trend rule: close vs SMA20 and vs the close 10 bars back, checked on the bar before the pattern.
@@ -18,3 +20,5 @@
 
 Run order, one process at a time (about 1 minute in total):
 `python3 bt_standalone.py && python3 report_a.py && python3 filter_b.py && python3 report_b.py`
+- `brk_refresh.py` — re-checks the BRK block on the Nov 2026 refresh (`stop_variants_3r/out3y`) → `brk_refresh.json`.
+- `parity_live.py` — live filter (`app/candles21.check` on live-sized 4H windows) vs the research filter. It must print `PARITY OK`. Takes about 75 s and handles one symbol at a time.

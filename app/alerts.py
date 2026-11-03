@@ -53,7 +53,7 @@ def compute():
     """Per active strategy: live window stats, backtest fallback, verdict."""
     from . import trades, webapp
     since = datetime.now(timezone.utc) - timedelta(days=WINDOW)
-    rows = trades._sig_rows("WHERE 1=1") + trades._don_rows()
+    rows = trades._sig_rows("WHERE status<>'filtered'") + trades._don_rows()
     try: bt = (webapp.latest_backtest() or {}).get("strategies", {})
     except Exception: bt = {}
     out = {}
