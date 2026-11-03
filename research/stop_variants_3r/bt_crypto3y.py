@@ -11,6 +11,8 @@ import numpy as np, pandas as pd
 from app import config as C, strategy, outcomes
 from app import patterns_live as P, don20 as D
 from app.backtest_all import mtm
+from app import variants as _V
+_V.MODE = {}   # "live" column = pre-2026-10-31 rules (as in the Oct 30 run); the new live stop setups are the w1.5/w2/c60/cur variant columns (engine.py, identical to app/variants.py)
 from engine import Candles, resample, run_variants
 C.MIN_STOP_PCT_CRYPTO = 0.3
 DATA = os.path.join(HERE, "data"); OUT = os.path.join(HERE, "out3y")
@@ -71,7 +73,7 @@ def run(sym):
         sigs.append(dict(strategy="CHK", t=now, direction=sig["direction"], entry=sig["entry"], sl=sig["sl"], limit=False, j0=s0,
                          live_status=st, live_r=r if st in ("tp", "sl", "be") else mtm(sig, fut)))
     # ---- BRK / PAT-WEDGE / PAT-CUP (4H, market entry at the 4H close)
-    todo = [("BRK",) + P.brk_series(h4, "crypto", levels=C.BRK_LEVELS)] + [(nm,) + P.pat_series(nm, h4, "crypto") for nm, v in P.PAT.items() if v[0] == "crypto" or nm == "PAT-TRIPLE"]
+    todo = [("BRK",) + P.brk_series(h4, "crypto", levels=C.BRK_LEVELS)] + [(nm,) + P.pat_series(nm, h4, "crypto") for nm, v in P.PAT.items() if (v[0] == "crypto" or nm == "PAT-TRIPLE") and nm != "PAT-TRIPLE-C"]   # PAT-TRIPLE-C = PAT-TRIPLE crypto (same signals)
     todo = [x for x in todo if want(x[0])]
     for nm, dd, aa, E in todo:
         R = 3.0 if nm == "BRK" else P.PAT[nm][5]; seen = set()

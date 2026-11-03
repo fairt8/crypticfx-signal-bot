@@ -46,7 +46,7 @@ def main():
          f"Forex {per.get('forex','–')}, {nf} pairs. Net R after fees.",
          f"Blocks: Y1 = {d.t.min():%Y-%m-%d} → {E[0]:%Y-%m-%d}, Y2 = → {E[1]:%Y-%m-%d}, Y3 = last 12 months → {end:%Y-%m-%d}. "
          f"2/3 split: crypto {split['crypto']:%Y-%m-%d}, forex {split.get('forex', d.t.max()):%Y-%m-%d}.",
-         "Note: CHK covers 2024-12-05 → 2026-10-29 only (an old 694-day max-age cut, see README); every other strategy covers the full period. "
+         "Every strategy covers the full period (CHK max-age bug fixed in the Nov 2026 re-run). 'live' = pre-2026-10-31 rules; today's live setups are the variant rows (see README). "
          "✅ = net R > 0, positive in a majority of Y1–Y3, and positive in Y3.", ""]
     for s, mk in ORDER:
         g = d[(d.strategy == s) & (d.market == mk)]

@@ -6,7 +6,7 @@ HERE=os.path.dirname(os.path.abspath(__file__))
 d=load(); d["yr"]=d.t.dt.year
 R=json.load(open(f"{HERE}/results3y.json"))["results"]
 L=["# Per-year results, 3-year backtest (net R after fees; trades; win %)","",
-"Crypto 2023-10-01→2026-10-29; forex 2024-01-24→2026-10-30. 2023 = Oct–Dec only. Same trade set as results3y.md.","",
+f"Crypto {d[d.market=='crypto'].t.min():%Y-%m-%d}→{d[d.market=='crypto'].t.max():%Y-%m-%d}; forex {d[d.market=='forex'].t.min():%Y-%m-%d}→{d[d.market=='forex'].t.max():%Y-%m-%d}. 2023 = Oct–Dec only. Same trade set as results3y.md.","",
 "| Strategy | Variant | 2023 | 2024 | 2025 | 2026 | Total |","|-|-|-|-|-|-|-|"]
 for s,m in ORDER:
   g0=d[(d.strategy==s)&(d.market==m)]

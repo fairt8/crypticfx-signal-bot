@@ -66,3 +66,9 @@ It loses under every variant there; re-run with `ONLY=CHK CRYOUT=out3y_fix SIDP=
 ## Run
 `python3 fetch_crypto.py; W=2 python3 bt_crypto3y.py; FXSRC=yahoo W=1 python3 bt_fx3y.py; python3 report3y.py` (box only, ~1.5 h at 2 workers;
 ~0.6 GB per worker). data/, out3y*/, out_fx*/ are git-ignored.
+
+## Nov 2026 re-run (monthly routine, 2026-11-03)
+- `update_data.py [crypto|fx]` appends Binance 15m daily files / merges a fresh Yahoo pull into data/ (Dukascopy was unreachable, so forex is still Yahoo from 2024-01, ~2.8 y).
+- `bt_crypto3y.py` now sets `app.variants.MODE = {}` so the "live" column = pre-2026-10-31 rules; the new live stop setups are the variant columns
+  (PAT-WEDGE w1.5, BRK cur, FVG-PLAN w1.5, PAT-TRIPLE crypto w2, FVG+TREND c60). PAT-TRIPLE-C is skipped (duplicate of PAT-TRIPLE crypto).
+- CHK now covers the full period (max-age fix). The Oct 30 outputs are kept locally in prev_oct30/ (gitignored).
