@@ -83,7 +83,19 @@ There are only two live tiers. There are no NORMAL or EXPERIMENTAL signals any m
 | 🔷 SECONDARY | FVG-PLAN | 1.5× swing stop, 3R |
 | 🔷 SECONDARY | PAT-TRIPLE-C (crypto) | 2× stop, 3R |
 | 🔷 SECONDARY | FVG+TREND | last closed 1h candle ∓0.1 ATR (set at fill), 3R |
+| 🔷 SECONDARY | DON28 (crypto, since 2026-11-04) | DON20 + coin's own 200-day SMA filter, 3×ATR trail |
 | 🗄 retired | FVG (old live), PAT-CUP | history kept, no new signals |
+
+### DON28 · DON20 + 200-day SMA filter (🔷 SECONDARY, since 2026-11-04)
+
+- **Rule:** exactly the DON20 setup (daily close beyond the prior 20-day high/low, 3×ATR20 stop, chandelier trail, no target, 0.1% fee per side), kept only when it agrees with the coin's own 200-day SMA of daily closes: longs only when the signal-day close is above SMA200, shorts only when it is at or below it.
+- **Research:** `research/don20_filters/don28_3y.py` (commit 1dba938): +349.4R over 3 years, 2023-10-01 → 2026-11-02, 127 coins, 2,199 trades.
+- **Under 200 daily bars:** like the research (`cma = 0` → no filter), a coin with fewer than 200 daily bars is **not** skipped; its DON28 signal equals its DON20 signal (`SMA_UNKNOWN_PASSES` in `app/don20.py`). On the research data that is 495 of 3,174 per-coin entries (young listings).
+- **Tracking:** its own table `don28` (same columns as `don20`) with its own one-position-per-coin rule, trail and exits, so it can differ from DON20 when one of them already holds the coin. It starts empty on 2026-11-04: no backfill, and DON20 positions are untouched. Same daily run as DON20 (after 00:05 UTC); one daily fetch of 260 daily candles per coin serves both. Stops are checked every 15-minute scan, like DON20. No per-scan cap (DON20 has none either). The per-scan `last_checked` writes for DON20/DON28 are batched into one UPDATE per table.
+- **Telegram:** a DON28 entry/exit that mirrors a DON20 one posted in the same run (same coin, direction and signal day) is folded into the DON20 message as a line (`🔷 also DON28 ✓ (above/below SMA200 …)`, or `🔷 also DON28 #id closed`). Otherwise it gets its own 🔷 SECONDARY message, only when the alert mode includes SECONDARY (muted ones are still recorded). Trail lines identical to DON20 are not repeated.
+- **Where it shows:** `/secondary`, `/signals`, `/don28` (live PnL card), `/stats`, the 6h summary, the dashboard `/`, the Mini App `/app`, and `/api/desk` (tier `secondary`).
+- **Switch:** `ENABLE_DON28` (env, default `1`).
+- **Parity:** `research/don20_filters/don28_parity.py` replays the research engine with the entry decision swapped for the live `signal()` + `don28_ok()` on the live 259-closed-bar window. On all 191 coins in `d1x3/`, it matched 3,174 of 3,174 research trades (signal day, direction and status) with 0 mismatches (`don28_parity.json`).
 
 ### Opposite-candle filters (since 2026-11-03)
 
@@ -101,7 +113,7 @@ BRK and PAT-TRIPLE forex skip **new** signals when a candlestick pattern pointin
 - `CANDLE_FILTERS` (env, default `BRK,PAT-TRIPLE`) switches them. Set it to empty to turn both off.
 - Parity: `research/candles21/parity_live.py` runs the live filter on live-sized windows and compares it with the research filter on the full history. On the 3-year trades, BRK filtered 1831/5117 in both and PAT-TRIPLE FX 8/165 (prev_oct30) and 8/167 (out3y) in both, with 0 mismatches.
 
-The stop variants live in `app/variants.py`. They are the same code as the backtest in `research/stop_variants_3r/engine.py`. The crypto stop floor is 0.3%, and the $1M crypto volume floor still applies. Alert modes are `/alerts primary` and `/alerts primary_secondary`. Other commands are `/signals`, `/primary`, `/secondary` and `/stats`. The Mini App is at `/app` (owner only) and the dashboard is at `/`.
+The stop variants live in `app/variants.py`. They are the same code as the backtest in `research/stop_variants_3r/engine.py`. The crypto stop floor is 0.3%, and the $1M crypto volume floor still applies. Alert modes are `/alerts primary` and `/alerts primary_secondary`. Other commands are `/signals`, `/primary`, `/secondary`, `/don20`, `/don28` and `/stats`. The Mini App is at `/app` (owner only) and the dashboard is at `/`.
 
 Only **crypto FVG setups with raw setup score ≥ `MIN_POST_SCORE` (default 70, env-overridable)** are saved and posted (TP stays 1:3). Forex, CHK and sub-70 crypto FVG setups are dropped before saving, so dashboard/stats match Telegram. FVG+TREND / FVG-PLAN / FVG-D1 experimental tags still ride on qualifying signals. Backtest v3: ~29% win rate, ≈ +0.02R/trade (break-even; paper signals, not an edge).
 `TELEGRAM_BOT_TOKEN` is sanitized (whitespace/quotes/leading `bot` stripped); `/api/stats` → `telegram_token_shape` shows length/regex/getMe result only.

@@ -112,7 +112,7 @@ def net_r(r):
     if r["result_r"] is None: return None
     risk = abs(r["entry"]-r["sl"])/r["entry"]; k = "metal" if str(r["symbol"]).startswith("XA") else r["market"]   # XAUUSD, XAGUSD, synthetic XAUAUD
     return r["result_r"] - (COST[k]/risk if risk > 0 else 0)
-STRATS = ("MF-REJ", "PAT-TRIPLE", "PAT-WEDGE", "BRK", "CHK", "FVG-D1", "FVG-PLAN", "PAT-TRIPLE-C", "FVG+TREND", "FVG", "PAT-CUP")   # + DON20 (own table); labels from strategies.py
+STRATS = ("MF-REJ", "PAT-TRIPLE", "PAT-WEDGE", "BRK", "CHK", "FVG-D1", "FVG-PLAN", "PAT-TRIPLE-C", "FVG+TREND", "FVG", "PAT-CUP")   # + DON20, DON28 (own tables); labels from strategies.py
 EXACT = ("FVG+TREND",)   # match on the strategy column only (old FVG rows merely *tagged* FVG+TREND used the old stop, not the live 1h-candle rule)
 def by_strategy(days=60):
     from . import strategies as SG
@@ -125,8 +125,11 @@ def by_strategy(days=60):
             win_rate=round(100*w/len(cl),1) if cl else None, gross_r=round(sum(r["result_r"] for r in cl),2),
             net_r=round(sum(nets),2), net_per_trade=round(sum(nets)/len(cl),3) if cl else None)
     try:
-        from . import don20; out["DON20"] = dict(don20.summary(), label=SG.full("DON20"), short="DON20", tier_label=SG.label("DON20"), status=SG.status("DON20"))
-    except Exception as e: out["DON20"] = dict(label=SG.full("DON20"), status="primary", signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
+        from . import don20; dk = don20.keys()
+    except Exception: dk = ["DON20"]
+    for k in dk:   # Donchian strategies: own tables (DON20 ⭐, DON28 🔷)
+        try: out[k] = dict(don20.summary(k), label=SG.full(k), short=k, tier_label=SG.label(k), status=SG.status(k))
+        except Exception as e: out[k] = dict(label=SG.full(k), status=SG.status(k), signals=0, closed=0, open=0, win_rate=None, gross_r=0, net_r=0, net_per_trade=None, error=str(e))
     rank = {s: i for i, s in enumerate(SG.ORDER)}   # PRIMARY, SECONDARY, then RETIRED
     return dict(sorted(out.items(), key=lambda kv: (rank.get(kv[1].get("status"), 9), list(SG.STATUS).index(kv[0]) if kv[0] in SG.STATUS else 99)))
 def stats(days=30, tier=None):

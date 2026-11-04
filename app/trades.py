@@ -70,10 +70,11 @@ def _sig(r):
         d["result_r"] = round(r["result_r"], 3); n = db.net_r(r); d["net_r"] = round(n, 3)
         d["gross_pct"] = round(r["result_r"]*rf*100, 3); d["net_pct"] = round(n*rf*100, 3)
     return d
-def _don(p):
+def _don(p, k="DON20"):
+    """Donchian position row (DON20 or DON28 table). kind stays 'don20' = market entry + trailing stop (UI rendering)."""
     st = "open" if p["status"] == "open" else "closed"; risk = abs(p["entry"] - p["init_stop"])
-    d = dict(kind="don20", id=p["id"], symbol=p["symbol"], market="crypto", strategy="DON20", strategy_key="DON20",
-             strategy_status=SG.status("DON20"), strategy_label=SG.label("DON20"), strategy_short="DON20", direction=p["direction"],
+    d = dict(kind="don20", id=p["id"], symbol=p["symbol"], market="crypto", strategy=k, strategy_key=k,
+             strategy_status=SG.status(k), strategy_label=SG.label(k), strategy_short=k, direction=p["direction"],
              status=st, entry=p["entry"], sl=p["stop"], init_stop=p["init_stop"], tp=None, rr=None,
              created_at=p.get("opened_at"), filled_at=p.get("opened_at"), closed_at=p.get("closed_at"),
              risk_frac=risk/p["entry"] if p["entry"] else 0, cost=0.001)
@@ -83,11 +84,19 @@ def _don(p):
                  gross_pct=round(sd*(x-p["entry"])/p["entry"]*100, 3),
                  net_pct=round((sd*(x-p["entry"]) - 0.001*(p["entry"]+x))/p["entry"]*100, 3))
     return d
-def _don_rows(where="", params=()):
+def _don_rows(where="", params=(), strategies=None):
+    """DON20 + DON28 positions in ONE query (UNION ALL; Neon-friendly). strategies=("DON20",) etc. to limit."""
+    from . import don20
+    ks = [k for k in (strategies or don20.keys())]
     try:
-        from . import don20
-        return [_don(p) for p in don20._rows("SELECT * FROM don20" + where + " ORDER BY id DESC", params)]
-    except Exception: return []
+        cols = ("id,symbol,direction,signal_day,opened_at,entry,init_stop,stop,atr,best_close,status,last_checked,"
+                "closed_at,exit_price,result_r,net_r,posted")   # explicit list: UNION needs identical columns in both tables
+        sql = " UNION ALL ".join(f"SELECT {cols}, '{k}' AS strat FROM {don20.TABLE[k]}{where}" for k in ks)
+        rs = don20._rows(sql + " ORDER BY id DESC", tuple(params) * len(ks))
+        return [_don(p, p.pop("strat")) for p in rs]
+    except Exception:
+        if ks == ["DON20"]: return []
+        return _don_rows(where, params, ("DON20",))   # e.g. don28 table not created yet
 def _sig_rows(where, params=()):
     with db.conn() as c:
         return [_sig(db.row(r)) for r in c.execute("SELECT * FROM signals " + where + " ORDER BY id DESC", params)]
@@ -146,12 +155,12 @@ def retire_close():
     return n
 def _raw(sql, params=()):
     with db.conn() as c: return c.execute(sql, params).fetchall()
-def don20_pnl():
-    """DON20 live total: closed net R + open live net R (latest price, same per-side fee as don20._r)."""
-    allp = _don_rows(); op = live([r for r in allp if r["status"] == "open"]); cl = [r for r in allp if r["status"] == "closed"]
+def don20_pnl(k="DON20"):
+    """DON20 (or DON28) live total: closed net R + open live net R (latest price, same per-side fee as don20._r)."""
+    allp = _don_rows(strategies=(k,)); op = live([r for r in allp if r["status"] == "open"]); cl = [r for r in allp if r["status"] == "closed"]
     c_net = sum(r.get("net_r") or 0 for r in cl); o_net = sum(r.get("live_net_r") or 0 for r in op)
     first = min((str(r["created_at"]) for r in allp if r.get("created_at")), default=None)
-    return dict(strategy="DON20", label=SG.full("DON20"), since=first, as_of=datetime.now(timezone.utc).isoformat(),
+    return dict(strategy=k, label=SG.full(k), since=first, as_of=datetime.now(timezone.utc).isoformat(),
                 closed=len(cl), closed_net_r=round(c_net, 2), closed_win_rate=round(100*sum((r.get("net_r") or 0) > 0 for r in cl)/len(cl), 1) if cl else None,
                 open=len(op), open_live_net_r=round(o_net, 2), open_priced=sum(r.get("price_now") is not None for r in op),
                 total_net_r=round(c_net + o_net, 2), open_in_profit=sum((r.get("live_r") or 0) > 0 for r in op),

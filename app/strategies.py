@@ -7,7 +7,8 @@ STATUS = {
     "DON20": "primary", "MF-REJ": "primary", "PAT-TRIPLE": "primary", "PAT-WEDGE": "primary", "BRK": "primary",
     # 🔷 SECONDARY
     "CHK": "secondary", "FVG-D1": "secondary", "FVG-PLAN": "secondary", "PAT-TRIPLE-C": "secondary", "FVG+TREND": "secondary",
-    # 🗄 RETIRED (no live signals; monthly backtest only). MF-REJ crypto and DON28 were never live: research scripts only.
+    "DON28": "secondary",   # user 2026-11-04: DON20 + coin SMA200 filter (research/don20_filters/don28_3y.py)
+    # 🗄 RETIRED (no live signals; monthly backtest only). MF-REJ crypto was never live: research scripts only.
     "FVG": "retired", "PAT-CUP": "retired",
 }
 TIERS = ("primary", "secondary")
@@ -22,6 +23,7 @@ NAME = {"DON20": "DON20 · daily Donchian-20 breakout, 3×ATR trail",
         "FVG-PLAN": "FVG-PLAN · FVG creator plan · 1.5× swing stop · 3R",
         "PAT-TRIPLE-C": "PAT-TRIPLE crypto · 4H triple top/bottom retest · 2× stop · 3R",
         "FVG+TREND": "FVG+TREND · FVG with EMA50/200 trend · 1h-candle stop · 3R",
+        "DON28": "DON28 · DON20 breakout + coin 200-day SMA filter, 3×ATR trail",
         "FVG": "FVG (old live) · 4H→15m FVG", "PAT-CUP": "PAT-CUP · 4H cup & handle retest"}
 SHORT = {"PAT-TRIPLE": "PAT-TRIPLE FX", "PAT-TRIPLE-C": "PAT-TRIPLE crypto", "MF-REJ": "MF-REJ FX"}
 ORDER = ["primary", "secondary", "retired"]

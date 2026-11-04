@@ -98,7 +98,7 @@ def _aux():
     _C.update(aux=out, aux_t=time.time()); return out
 
 def _alerts_feed(sigs, dons, muted):
-    """Recent alerts (7 days): signal rows with posted flag + DON20 entries (muted = saved but not pushed by alert mode)."""
+    """Recent alerts (7 days): signal rows with posted flag + DON20/DON28 entries (muted = saved but not pushed by alert mode)."""
     since = datetime.now(timezone.utc) - timedelta(days=7); out = []
     mk = {(m.get("symbol"), m.get("strategy")) for m in muted}
     for r in sigs:
@@ -106,7 +106,7 @@ def _alerts_feed(sigs, dons, muted):
         if t and t >= since: out.append(dict(r, sent=r["posted"]))
     for r in dons:
         t = _ts(r.get("created_at"))
-        if t and t >= since: out.append(dict(r, sent=(r["symbol"], "DON20") not in mk))
+        if t and t >= since: out.append(dict(r, sent=(r["symbol"], r["strategy"]) not in mk))
     out.sort(key=lambda r: str(_ts(r.get("created_at")) or ""), reverse=True)
     keep = ("kind", "id", "symbol", "market", "strategy", "strategy_status", "strategy_short", "direction", "status", "entry", "sl", "tp", "rr",
             "created_at", "net_r", "live_net_r", "sent")

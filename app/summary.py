@@ -41,7 +41,7 @@ def build(hours=None):
         if v.get("status") == "retired": continue
         wr = v['win_rate'] if v['win_rate'] is not None else '—'
         dot = "🟢" if v['net_r'] > 0 else ("🔴" if v['net_r'] < 0 else "⚪")
-        extra = f" · {v.get('open',0)} open" if k == "DON20" else ""
+        extra = f" · {v.get('open',0)} open" if k in ("DON20", "DON28") else ""
         L.append(f"{dot} {SG.label(k).split()[0]} {esc(SG.short(k))}: {v['closed']} closed{extra} · win {wr}% · <code>{v['net_r']}R</code>")
     try:
         from . import alerts

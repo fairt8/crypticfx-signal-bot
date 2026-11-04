@@ -14,7 +14,7 @@ Strategies and how they are replayed (same functions the live scan calls):
               outcome on 1H bars at the next-zone TP. (The dynamic 'strong pair' is not replayed.)
   PAT-TRIPLE (forex) / PAT-WEDGE, PAT-TRIPLE-C, PAT-CUP, BRK (crypto)  patterns_live.pat_series / brk_series on 4H, outcome on 4H;
               crypto PAT/BRK use the live stop variants (PAT-WEDGE 1.5×, PAT-TRIPLE-C 2×, 0.3% floor) and a fixed 3R target.
-  Not replayed here (research only, never live): MF-REJ crypto, DON28 (research/stop_variants_3r).
+  Not replayed here: MF-REJ crypto (research only) and DON28 (live 🔷 SECONDARY since 2026-11-04; 3y backtest in research/don20_filters/don28_3y.py).
 Costs (round trip, in R = cost / stop distance): crypto 0.10%, forex majors 0.02%, crosses + CNH 0.03%, metals 0.05%.
 Seasons: crypto = BTC daily vs its 200D SMA and the SMA's 20-day slope (bull: above & rising, bear: below & falling, else range);
 forex = the same rule on each pair's own daily closes. A trade gets the season of the day before its entry."""

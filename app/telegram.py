@@ -165,10 +165,10 @@ def cmd_symbol(arg, full):
         other = [r for r in rows if r["status"] not in ("open",) and r.get("net_r") is None]
         if other: L += ["<b>Other</b>"] + [f"{_hdr(r)}  · {esc(r['status'])}  <i>{_wat(r['created_at'])} WAT</i>" for r in other]
     return "\n".join(L)
-def cmd_don20():
-    from . import trades as T
-    d = T.don20_pnl()
-    return "\n".join([f"⭐ <b>PRIMARY · DON20 live PnL</b>", f"⏰ as of {wat(d['as_of'])}" + (f" · since {_wat(d['since'])} WAT" if d['since'] else ""), "━━━━━━━━━━━━",
+def cmd_don20(k="DON20"):
+    from . import trades as T, strategies as SG
+    d = T.don20_pnl(k)
+    return "\n".join([f"{TIER_ICON.get(SG.status(k), '')} <b>{SG.LABEL[SG.status(k)].split(' ', 1)[-1]} · {k} live PnL</b>", f"⏰ as of {wat(d['as_of'])}" + (f" · since {_wat(d['since'])} WAT" if d['since'] else ""), "━━━━━━━━━━━━",
         f"🏁 Closed: {d['closed']}  ·  {_sg(d['closed_net_r'], 'R')} net" + (f"  ·  win {d['closed_win_rate']}%" if d['closed_win_rate'] is not None else ""),
         f"📈 Open: {d['open']}  ·  {_sg(d['open_live_net_r'], 'R')} net live  ·  🟩 {d['open_in_profit']} in profit",
         f"💰 <b>Total</b> {_sg(d['total_net_r'], 'R')} net (closed + open live)"])
@@ -190,11 +190,11 @@ def _compact(r):
             f"{TIER_ICON.get(SG.status(k), '')} {esc(SG.short(k))} #{r['id']} · {st}\n"
             f"    📍 {code(r['entry'])}  🛑 {code(r['sl'])}  🎯 {code(r['tp'])}  ⚖️ 1:{float(r.get('rr') or 0):.3g}\n"
             f"    🕒 <i>{_wat(r.get('confirm_time') or r['created_at'])} WAT</i>")
-def _don_block():
-    from . import trades as T
-    dn = sorted(T.live(T._don_rows(" WHERE status='open'")), key=lambda r: str(r.get("created_at") or ""), reverse=True)
+def _don_block(k="DON20"):
+    from . import trades as T, strategies as SG
+    dn = sorted(T.live(T._don_rows(" WHERE status='open'", strategies=(k,))), key=lambda r: str(r.get("created_at") or ""), reverse=True)
     tot = sum(r.get("live_net_r") or 0 for r in dn)
-    out = f"⭐ <b>DON20 open positions</b> ({len(dn)}) · live {_sg(tot, 'R')} net\n" + ("\n".join(_live_line(r) for r in dn[:12]) or "<i>No open DON20 positions.</i>")
+    out = f"{TIER_ICON.get(SG.status(k), '')} <b>{k} open positions</b> ({len(dn)}) · live {_sg(tot, 'R')} net\n" + ("\n".join(_live_line(r) for r in dn[:12]) or f"<i>No open {k} positions.</i>")
     if len(dn) > 12: out += f"\n<i>…and {len(dn)-12} more (/open)</i>"
     return out
 def cmd_signals(arg):
@@ -210,8 +210,9 @@ def cmd_signals(arg):
         g = [r for r in rs if alerts.in_tier(SG.eff(r["strategy"], r["tags"]), t)]
         if t == "profitable": L.append(f"<i>💰 now: {esc(', '.join(sorted(alerts.profitable_set())) or 'none')}</i>")
         L.append(f"\n<b>{SIG_TIERS[t]}</b> · {len(g)} open/pending")
-        if alerts.in_tier("DON20", t): L.append(_don_block())
-        L += [_compact(r) for r in g[:12]] or (["<i>No open/pending signals.</i>"] if not alerts.in_tier("DON20", t) else [])
+        dks = [k for k in ("DON20", "DON28") if SG.active(k) and alerts.in_tier(k, t)]
+        for k in dks: L.append(_don_block(k))
+        L += [_compact(r) for r in g[:12]] or (["<i>No open/pending signals.</i>"] if not dks else [])
         if len(g) > 12: L.append(f"<i>…and {len(g)-12} more – Mini App ▸ Signals</i>")
     L += ["", "<i>Full card: /explain ID · Mini App: /app</i>"]
     return "\n".join(L)
@@ -241,7 +242,7 @@ def on_callback(q):
         requests.post(API("editMessageText"), json=dict(chat_id=chat, message_id=q["message"]["message_id"], parse_mode="HTML",
                       text=_alerts_text(), reply_markup=_alerts_markup(m)), timeout=10)
     else: requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"]), timeout=10)
-HTML_CMDS = ("/signals", "/primary", "/secondary", "/open", "/closed", "/pending", "/new", "/retired", "/don20", "/strategies", "/pnl", "/trades", "/stats", "/help", "/start")
+HTML_CMDS = ("/signals", "/primary", "/secondary", "/open", "/closed", "/pending", "/new", "/retired", "/don20", "/don28", "/strategies", "/pnl", "/trades", "/stats", "/help", "/start")
 def help_html():
     from . import strategies as SG, alerts
     pr = " · ".join(SG.short(k) for k in SG.STATUS if SG.status(k) == "primary"); se = " · ".join(SG.short(k) for k in SG.STATUS if SG.status(k) == "secondary")
@@ -251,7 +252,7 @@ def help_html():
         "  /signals – open + pending, by tier\n  /primary · /secondary – one tier only\n  /alerts – push ⭐ only or ⭐ + 🔷\n\n"
         "📈 <b>Trades &amp; PnL</b>\n"
         "  /open – live trades with PnL\n  /closed [day|week|month|all] – results\n  /pending · /new [period]\n"
-        "  /pnl SYMBOL · /trades SYMBOL – one token\n  /don20 – DON20 total PnL\n  /stats – 30-day stats by tier\n\n"
+        "  /pnl SYMBOL · /trades SYMBOL – one token\n  /don20 · /don28 – DON20 ⭐ / DON28 🔷 total PnL\n  /stats – 30-day stats by tier\n\n"
         "🧭 <b>More</b>\n  /strategies – tiers + live verdicts\n  /retired – retired strategy history\n"
         "  /explain ID – full signal card + AI note\n  /ask question – ask AI\n  📱 /app – the Mini App (also the ☰ button)")
 HELP = "/signals – open/pending signals\n/primary · /secondary – one tier\n/alerts – alert mode\n/stats – 30-day stats\n/help – all commands"
@@ -270,6 +271,7 @@ def handle(text, chat):
     if cmd in ("/start", "/help"): return help_html()
     if cmd in ("/open", "/closed", "/pending", "/new", "/retired"): return cmd_trades_state(cmd[1:], arg)
     if cmd == "/don20": return cmd_don20()
+    if cmd == "/don28": return cmd_don20("DON28")
     if cmd == "/strategies": return cmd_strategies()
     if cmd in ("/pnl", "/trades"): return cmd_symbol(arg, cmd == "/trades")
     if cmd == "/signals": return cmd_signals(arg)

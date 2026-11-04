@@ -29,13 +29,12 @@ def desk_api():
     """Equity (R), per-tier/strategy stats, positions with live price, recent alerts, health. Cached 60s server-side."""
     from . import desk; return desk.get()
 def tier_rows(days, tier):
-    """Signals of one tier (primary|secondary|profitable), with DON20 positions included when the tier covers DON20."""
+    """Signals of one tier (primary|secondary|profitable), with DON20/DON28 positions included when the tier covers them."""
     from . import alerts, strategies as SG, trades
     rs = [dict(r, strategy_key=SG.eff(r.get("strategy"), r.get("tags"))) for r in db.recent(days)]
     rs = [r for r in rs if SG.active(r["strategy_key"]) and alerts.in_tier(r["strategy_key"], tier)]
-    if alerts.in_tier("DON20", tier):
-        since = trades._since(days)
-        rs += [dict(r, confidence=None, kind="don20") for r in trades._don_rows() if r["status"] == "open" or trades._in(r["created_at"], since)]
+    since = trades._since(days)   # DON20 ⭐ / DON28 🔷 positions of this tier
+    rs += [dict(r, confidence=None, kind="don20") for r in trades._don_rows() if alerts.in_tier(r["strategy"], tier) and (r["status"] == "open" or trades._in(r["created_at"], since))]
     rs.sort(key=lambda r: str(trades._ts(r.get("created_at")) or ""), reverse=True); return rs
 @app.get("/api/signals")
 def signals(days: int = 30, tier: str = ""):
@@ -49,7 +48,7 @@ def alerts_state():   # read-only (mode can only be changed from Telegram: /aler
 def strategies_enabled():
     """Live on/off per strategy (env flags), for diagnostics."""
     pat = lambda k: C.ENABLE_PAT and k in C.PAT_ENABLED
-    return {"DON20": True, "MF-REJ": C.ENABLE_MF, "PAT-TRIPLE": pat("PAT-TRIPLE"), "PAT-WEDGE": pat("PAT-WEDGE"),
+    return {"DON20": True, "DON28": C.ENABLE_DON28, "MF-REJ": C.ENABLE_MF, "PAT-TRIPLE": pat("PAT-TRIPLE"), "PAT-WEDGE": pat("PAT-WEDGE"),
             "BRK": C.ENABLE_BRK, "CHK": C.ENABLE_CHK, "FVG-D1": C.ENABLE_D1, "FVG-PLAN": C.ENABLE_FVG_PLAN, "PAT-TRIPLE-C": pat("PAT-TRIPLE-C"),
             "FVG+TREND": C.ENABLE_FVG_TREND, "FVG": C.ENABLE_FVG_LIVE, "PAT-CUP": pat("PAT-CUP")}
 def tier_map():

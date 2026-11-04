@@ -60,6 +60,7 @@ ENABLE_FVG_TREND = E("ENABLE_FVG_TREND", "1") == "1"  # FVG+TREND [🔷 SECONDAR
 PTP_STRATS = set(filter(None, E("PTP_STRATS", "FVG,FVG-D1,CHK").split(",")))  # tracked outcome = 50% at TP1 (1.5R), SL to entry, rest to TP (bt_ptp)
 ENABLE_MF = E("ENABLE_MF", "1") == "1"   # MF-REJ [⭐ PRIMARY] forex zone rejection (strategy.MF_PAIRS)
 ENABLE_DON20 = E("ENABLE_DON20", "1") == "1"   # DON20 [⭐ PRIMARY] daily Donchian-20 crypto breakout
+ENABLE_DON28 = E("ENABLE_DON28", "1") == "1"   # DON28 [🔷 SECONDARY] = DON20 + coin SMA200 filter (runs inside the DON20 daily run)
 ENABLE_PAT = E("ENABLE_PAT", "1") == "1"   # PAT-WEDGE / PAT-TRIPLE (FX + crypto) 4H pattern retests (tiers in strategies.py) (app/patterns_live.py)
 ENABLE_BRK = E("ENABLE_BRK", "1") == "1"   # BRK [⭐ PRIMARY] 4H crypto neckline/trendline breakout (see BRK_MARKETS/BRK_LEVELS)
 PAT_ENABLED = set(x for x in E("PAT_ENABLED", "PAT-TRIPLE,PAT-WEDGE,PAT-TRIPLE-C").split(",") if x)   # live PAT-*: FX triple (⭐), crypto wedge 1.5× stop (⭐), crypto triple 2× stop (🔷); PAT-CUP retired
