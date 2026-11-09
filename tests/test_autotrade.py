@@ -507,3 +507,111 @@ def test_old_rows_without_exchange_are_mexc(monkeypatch):
     A.ensure_table(); A._insert(source="sig", ref_id=5, strategy="BRK", symbol="BTCUSDT", direction="long", status="closed", dry=1, pnl_usdt=1.0, closed_at=datetime.now(timezone.utc).isoformat())
     assert A.exof(rows()[0]) == "mexc"
     A._TBL["ok"] = False; A.ensure_table(); A.ensure_table()   # migration is idempotent
+
+# =================== t142u: leverage MAX + liquidation guard, max position size, Limit → Market ===================
+def test_leverage_max_tier_and_liquidation_guard():
+    c = dict(CON["BTC_USDT"], initialMarginRate=0.002, maintenanceMarginRate=0.001)
+    ad = X.Mexc(Fake())
+    lev, info = X.choose_leverage(ad, "BTC_USDT", c, 100, 1000, 100000, 99000, "long", "max", 5)   # 1% stop: 500x would liquidate first
+    assert info["tier_max"] == 500 and info["stepped_from"] == 500 and lev == 90
+    assert not X.liq_inside(100000, 99000, lev, 0.001, "long") and X.liq_inside(100000, 99000, lev + 1, 0.001, "long")
+    lev, info = X.choose_leverage(ad, "BTC_USDT", c, 100, 1000, 100000, 101000, "short", "max", 5); assert lev == 90   # same for shorts
+    assert X.choose_leverage(ad, "BTC_USDT", c, 100, 1000, 100000, 99000, "long", "cap", 5)[0] == 5          # cap mode, no step needed
+    assert X.choose_leverage(ad, "BTC_USDT", c, 100, 1000, 100000, 80000, "long", "cap", 10)[0] == 4         # 20% stop: 10x liq inside -> 4x
+    t = dict(c, riskBaseVol=100, riskIncrVol=100, riskIncrImr=0.01, riskIncrMmr=0.005, riskLevelLimit=5)
+    assert ad.tier("BTC_USDT", t, 250, 0) == dict(max_lev=45, mmr=0.011)                                   # level 2 tier by volume
+    fb = FakeBybit(); fb.risk_limits = lambda sym: [dict(riskLimitValue="300000", maintenanceMargin="0.0033", maxLeverage="150.00"), dict(riskLimitValue="2000000", maintenanceMargin="0.005", maxLeverage="100.00")]
+    b = X.Bybit(fb); bc = b.instrument("BTCUSDT")
+    assert b.tier("BTCUSDT", bc, 1, 100000) == dict(max_lev=150, mmr=0.0033) and b.tier("BTCUSDT", bc, 1, 500000)["max_lev"] == 100
+
+def test_live_order_uses_max_leverage_with_guard(monkeypatch, capsys):
+    live(monkeypatch, leverage="max"); assert A.settings(0)["lev_mode"] == "max"
+    sig(); fk = Fake(); A.tick(cl=fk, px_fn=PX(100500.0))
+    (b,) = [c[2] for c in fk.calls if c[0] == "create_order"]
+    assert not X.liq_inside(100000, 99000, b["leverage"], X.DEFAULT_MMR, "long") and X.liq_inside(100000, 99000, b["leverage"] + 1, X.DEFAULT_MMR, "long")
+    assert b["vol"] == 100 and "leverage 500x ->" in capsys.readouterr().out                         # size unchanged: risk ÷ stop
+    assert json.loads(rows()[0]["note"])["lev"]["stepped_from"] == 500
+
+def test_leverage_and_size_commands():
+    A.tg_command("/autotrade lev max"); assert A.settings(0)["lev_mode"] == "max"
+    A.tg_command("/autotrade lev 7"); s = A.settings(0); assert s["lev_mode"] == "cap" and s["leverage"] == 7
+    A.tg_command("/autotrade size 250"); assert A.settings(0)["max_notional_usdt"] == 250
+    A.tg_callback("at:lv:max"); assert A.settings(0)["lev_mode"] == "max"
+    t, mk = A.tg_command("/autotrade"); assert "Max position size" in t and "MAX" in t and "notional" not in t.lower().replace("lev", "")
+    assert any(b["callback_data"] == "at:ot:limit_market" for row in mk["inline_keyboard"] for b in row)
+
+def test_limit_to_market_dry_within_half_r(fresh):
+    enable(order_type="limit_market", limit_timeout_min=5); i = sig(); now = datetime.now(timezone.utc); fk = Fake(False)
+    A.tick(cl=fk, px_fn=PX(100300.0), now=now); r = rows()[0]
+    assert r["status"] == "open_order" and r["order_type"] == "limit_market" and json.loads(r["note"])["then_market"] == 1
+    A.tick(cl=fk, px_fn=PX(100300.0), now=now + timedelta(minutes=2)); assert rows()[0]["status"] == "open_order"
+    A.tick(cl=fk, px_fn=PX(100400.0), now=now + timedelta(minutes=6)); r = rows()[0]                  # 0.4R away -> market
+    assert r["status"] == "filled" and r["order_type"] == "market" and r["fill_price"] == 100400.0 and abs(r["risk_usdt"] - 10) < 0.2
+    assert any("→ market" in t for t in fresh) and fk.calls == []
+
+def test_limit_to_market_skipped_when_price_ran():
+    enable(order_type="limit_market", limit_timeout_min=5); sig(); now = datetime.now(timezone.utc)
+    A.tick(cl=Fake(False), px_fn=PX(100300.0), now=now)
+    A.tick(cl=Fake(False), px_fn=PX(100800.0), now=now + timedelta(minutes=6)); r = rows()[0]           # 0.8R away -> skip
+    assert r["status"] == "cancelled" and "no market entry" in r["exit_reason"] and "0.80R" in r["exit_reason"]
+
+def test_limit_to_market_skipped_when_signal_invalid():
+    enable(order_type="limit_market", limit_timeout_min=5); i = sig(); now = datetime.now(timezone.utc)
+    A.tick(cl=Fake(False), px_fn=PX(100300.0), now=now); db.update(i, status="expired")
+    A.tick(cl=Fake(False), px_fn=PX(100100.0), now=now + timedelta(minutes=6)); r = rows()[0]
+    assert r["status"] == "cancelled" and r["exit_reason"].startswith("not filled in 5 min; no market entry: signal expired")
+
+def test_limit_to_market_live_cancels_then_market_same_exchange(monkeypatch):
+    both_live(monkeypatch, order_type="limit_market", limit_timeout_min=10); sig(); now = datetime.now(timezone.utc); fk, fb = Fake(), FakeBybit()
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100300.0), now=now); ext = rows()[0]["ext_oid"]
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100200.0), now=now + timedelta(minutes=11))
+    cr = creates(fk); assert len(cr) == 2 and cr[0]["type"] == 1 and cr[1]["type"] == 5 and cr[1]["externalOid"] == ext + "m"
+    assert fk.n("cancel_ext") == 1 and fb.n("create_order") == 0 and rows()[0]["status"] == "open_order" and rows()[0]["order_type"] == "market"
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100200.0), now=now + timedelta(minutes=12)); assert rows()[0]["status"] == "filled"
+
+def test_limit_market_needs_timeout():
+    s = A.save_settings(dict(limit_timeout_min=0, order_type="limit_market")); assert s["limit_timeout_min"] == 15
+    s = A.save_settings(dict(order_type="limit", limit_timeout_min=0)); assert s["limit_timeout_min"] == 0 and s["order_type"] == "limit"
+    s = A.save_settings(dict(order_type="market")); assert s["order_type"] == "market"
+
+# =================== t144u: 📐 Size line on crypto signal alerts (additive) ===================
+def _sz_reset():
+    from app import sizing; sizing._C.update(t=0, v=None); return sizing
+def test_size_line_math_and_settings():
+    sizing = _sz_reset(); A.save_settings(dict(risk_usdt=10, leverage=5)); _sz_reset()
+    l = sizing.line("BTCUSDT", 100000, 99000); assert l == "📐 <b>Size</b>  0.01 BTC · $1,000.00 position · risk $10.00 · ≤5x → margin ~$200.00"
+    A.save_settings(dict(max_notional_usdt=500)); _sz_reset()
+    assert "0.005 BTC · $500.00 position · risk $5.00" in sizing.line("BTCUSDT", 100000, 99000)          # max position size caps it
+    A.save_settings(dict(leverage="max")); _sz_reset(); assert "MAX lev" in sizing.line("SOLUSDT", 150, 148)
+    assert sizing.line("EURUSD", 1.1, 1.09, market="forex") is None and sizing.line("BTCUSDT", 100, 100) is None
+    A.save_settings(dict(size_line=False)); _sz_reset(); assert sizing.line("BTCUSDT", 100000, 99000) is None
+    assert A.settings(0)["enabled"] is False                                                             # works with auto-trade OFF
+
+def test_size_line_is_additive_on_signal_alerts(monkeypatch, fresh):
+    from app import alerts; sizing = _sz_reset()
+    monkeypatch.setattr(alerts, "get_mode", lambda: "primary_secondary")
+    A.save_settings(dict(risk_usdt=10)); _sz_reset()
+    i = sig(status="open", strategy="BRK"); row = db.get(i); base = telegram.fmt(row)
+    telegram.post_group([row]); sent = fresh[-1]
+    assert "📐 <b>Size</b>" in sent and db.get(i)["posted"] == 1
+    assert "\n".join(x for x in sent.split("\n") if not x.startswith("📐")) == base                   # nothing else changed
+    j = sig(status="open", strategy="BRK", symbol="SOLUSDT", entry=150, sl=148, tp=156); r2 = db.get(j)
+    monkeypatch.setattr(sizing, "calc", lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    telegram.post_group([r2]); assert fresh[-1] == telegram.fmt(r2) and db.get(j)["posted"] == 1        # sizing fails -> line omitted
+    A.save_settings(dict(size_line=False)); _sz_reset(); monkeypatch.undo()
+    monkeypatch.setattr(alerts, "get_mode", lambda: "primary_secondary"); monkeypatch.setattr(telegram, "send", lambda t, chat_id=None, html=False: fresh.append(t) or True)
+    k = sig(status="open", strategy="BRK", symbol="ETHUSDT", entry=3000, sl=2950, tp=3150); r3 = db.get(k)
+    telegram.post_group([r3]); assert fresh[-1] == telegram.fmt(r3)
+
+def test_size_line_on_don_entry(monkeypatch, fresh):
+    from app import alerts; _sz_reset(); A.save_settings(dict(risk_usdt=10)); _sz_reset()
+    monkeypatch.setattr(alerts, "should_push", lambda k: True)
+    txt = "⭐ <b>PRIMARY · DON20</b>\nbody\n\n<i>Not financial advice.</i>"
+    don20._dispatch([dict(k="DON20", kind="entry", symbol="BTCUSDT", direction="long", day="d", id=1, extra=[], entry=100000.0, stop=97000.0, line="", text=txt)], True)
+    assert fresh[-1].startswith("⭐ <b>PRIMARY · DON20</b>\nbody\n📐 <b>Size</b>") and fresh[-1].endswith("<i>Not financial advice.</i>")
+    don20._dispatch([dict(k="DON20", kind="exit", symbol="BTCUSDT", direction="long", day="d", id=1, extra=[], line="", text="exit text")], True)
+    assert fresh[-1] == "exit text"                                                                      # exits untouched
+
+def test_sizing_module_is_pure():
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "sizing.py")).read()
+    for mod in ("import requests", "autotrade import", "from . import autotrade", "mexc", "bybit", "exchanges", "telegram"): assert mod not in src, mod

@@ -47,3 +47,19 @@ dry-run / health check after adding the key shows this.
 ### MEXC balance permission
 If the MEXC key lacks "View Account Details" (MEXC code 700007), auto-trade shows a note in Telegram (max every 12 h) and
 the Mini App, skips its own margin pre-check, and lets MEXC reject an order if margin is short.
+
+## Leverage MAX, max position size, Limit → Market (t142u)
+- Leverage: `cap` (≤ N x, `/autotrade lev 5`) or `max` (`/autotrade lev max`): the exchange's highest leverage for the coin
+  AND the order's size tier (MEXC contract risk tiers by volume; Bybit /v5/market/risk-limit by position value). In both
+  modes a guard steps leverage down 1x at a time while the estimated isolated liquidation price
+  (entry × (1 ∓ 1/lev ± maintenance-margin rate)) is at or inside the stop; this is logged and saved in the row note. Size is
+  always risk ÷ stop distance; leverage only changes the margin used.
+- "Max position size (USDT)" (formerly "max notional"; `/autotrade size 100`, 0 = off) caps qty × price per trade.
+- Order types: Limit · Limit → Market · Market. Limit → Market places the limit at entry; at the 5/10/15-min timeout it is
+  cancelled and re-entered at market on the SAME exchange only if the signal is still valid and price is within 0.5R of the
+  entry (not beyond SL/TP), re-sized at the live price; otherwise it is skipped. A partial fill before the cancel is kept.
+
+## 📐 Size line on crypto signal alerts (t144u)
+`app/sizing.py` appends one line ("📐 Size  qty BASE · $position · risk $ · leverage/margin") to every crypto signal alert and
+DON20/DON28 entry, from the same sizing settings, even when auto-trade is off. Additive only: no other alert content,
+signal generation or timing changes, and the line is omitted on any failure. `/autotrade sizeline on|off` (default on).

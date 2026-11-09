@@ -85,6 +85,9 @@ def post_group(rows):
     if not rows: return
     rows.sort(key=lambda r: FVG_ORDER.index(r["strategy"]) if r["strategy"] in FVG_ORDER else 9)
     text = fmt(rows[0])
+    try:
+        from . import sizing; text = sizing.add(text, rows[0]["symbol"], rows[0]["entry"], rows[0]["sl"], rows[0].get("market"))   # additive 📐 Size line
+    except Exception: pass
     for r in rows[1:]:
         text += (f"\n\n{LINE}\n➕ <b>Same setup · {esc(badge(r['strategy']))}</b>  #{r['id']}\n"
                  f"📍 {code(r['entry'])}   🛑 {code(r['sl'])}   🎯 {code(r['tp'])}   ⚖️ 1:{float(r['rr']):g}"
@@ -94,7 +97,12 @@ def post_group(rows):
 def post_signal(s):
     from . import alerts
     if not alerts.filter_push([s])[0]: return
-    if s["confidence"] >= C.MIN_CONFIDENCE_TO_POST and send(fmt(s), html=True): db.update(s["id"], posted=1)
+    if s["confidence"] < C.MIN_CONFIDENCE_TO_POST: return
+    text = fmt(s)
+    try:
+        from . import sizing; text = sizing.add(text, s["symbol"], s["entry"], s["sl"], s.get("market"))   # additive 📐 Size line
+    except Exception: pass
+    if send(text, html=True): db.update(s["id"], posted=1)
 # ---------- trade lists + PnL commands (app/trades.py) ----------
 def _wat(x):
     from .trades import _ts

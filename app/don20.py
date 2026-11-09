@@ -152,6 +152,10 @@ def _dispatch(items, post):
     for m in out:
         t = m["text"] + ("" if not m.get("extra") else "\n" + "\n".join(m["extra"]))
         if m["kind"] == "entry" and m.get("extra"): t = m["text"].replace("\n\n<i>Not financial advice.</i>", "") + "\n" + "\n".join(m["extra"]) + "\n\n<i>Not financial advice.</i>"
+        if m["kind"] == "entry" and m.get("entry") is not None:
+            try:
+                from . import sizing; t = sizing.add(t, m["symbol"], m["entry"], m["stop"])   # additive 📐 Size line (omitted on any failure)
+            except Exception: pass
         try: telegram.send(t, html=True)
         except Exception as e: STATE["errors"].append(f"telegram: {e}")
 
@@ -216,7 +220,7 @@ def _entries(k, universe, data, px, closed_today, now, msgs):
         hdr = "⭐ <b>PRIMARY · DON20</b>" if k == "DON20" else "🔷 <b>SECONDARY · DON28</b>"
         strat = "DON20 · daily Donchian-20 breakout" if k == "DON20" else "DON28 · DON20 breakout + coin's 200-day SMA trend filter"
         why = f"Daily close {code(n['close'])} {'above the 20-day high' if sd == 1 else 'below the 20-day low'}" + (f", {smatxt}" if k == "DON28" else "")
-        msgs.append(dict(k=k, kind="entry", symbol=n["symbol"], direction=n["direction"], day=n["signal_day"], id=n["id"], extra=[],
+        msgs.append(dict(k=k, kind="entry", symbol=n["symbol"], direction=n["direction"], day=n["signal_day"], id=n["id"], extra=[], entry=n["entry"], stop=n["stop"],
             line=f"🔷 <b>also DON28 ✓</b> ({smatxt}) · SECONDARY #{n['id']}",
             text="\n".join([hdr, "━━━━━━━━━━━━━━",
             f"{'🟢 <b>LONG</b>' if sd == 1 else '🔴 <b>SHORT</b>'}  <b>{esc(n['symbol'])}</b>  · crypto  #{n['id']}", "",

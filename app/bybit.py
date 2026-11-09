@@ -86,6 +86,14 @@ class Client:
             if not cur: break
         if out: self._ic.update(t=time.time(), v=out)
         return out or self._ic["v"]
+    def risk_limits(self, sym, ttl=6*3600):
+        """Risk-limit tiers (riskLimitValue = max position value, maintenanceMargin rate, maxLeverage), smallest first."""
+        c = self.__dict__.setdefault("_rl", {}); h = c.get(sym)
+        if h and time.time() - h[0] < ttl: return h[1]
+        d = self.public("/v5/market/risk-limit", dict(category="linear", symbol=sym)) or {}
+        l = sorted([x for x in d.get("list") or [] if x.get("symbol") == sym], key=lambda x: float(x.get("riskLimitValue") or 0))
+        if l: c[sym] = (time.time(), l)
+        return l
     def mark_price(self, sym):
         d = self.public("/v5/market/tickers", dict(category="linear", symbol=sym)) or {}
         l = d.get("list") or []; return float(l[0].get("markPrice") or 0) or None if l else None

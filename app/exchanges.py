@@ -50,8 +50,34 @@ class Base:
         return h["ok"]
     def mark_down(self, e): self._h.update(t=time.time(), ok=False, why=short(e) if isinstance(e, BaseException) else str(e))
 
+DEFAULT_MMR = 0.005
+def liq_price(ref, lev, mmr, direction):
+    """Estimated isolated-margin liquidation price (ignores fees / funding)."""
+    return ref * (1 - 1 / lev + mmr) if direction == "long" else ref * (1 + 1 / lev - mmr)
+def liq_inside(ref, sl, lev, mmr, direction):
+    lp = liq_price(ref, lev, mmr, direction)
+    return lp >= sl if direction == "long" else lp <= sl
+def choose_leverage(ad, sym, c, vol, notional, ref, sl, direction, mode="cap", cap=5):
+    """Leverage for an order: 'max' = the exchange's max for this size tier, 'cap' = min(cap, that max). Then the guard:
+    while the estimated liquidation price is at or inside the stop, step leverage down by 1. Returns (lev, info)."""
+    t = ad.tier(sym, c, vol, notional); mx = max(1, int(t["max_lev"])); mmr = float(t["mmr"])
+    lev = mx if mode == "max" else max(1, min(int(cap or 1), mx)); start = lev
+    while lev > 1 and liq_inside(ref, sl, lev, mmr, direction): lev -= 1
+    info = dict(mode=mode, tier_max=mx, mmr=mmr, chosen=lev, liq=round(liq_price(ref, lev, mmr, direction), 10))
+    if lev != start: info["stepped_from"] = start
+    return lev, info
+
 class Mexc(Base):
     name, label = "mexc", "MEXC"
+    def tier(self, sym, c, vol, notional):
+        """MEXC risk tiers BY_VOLUME: level n = ceil((vol - riskBaseVol) / riskIncrVol); imr/mmr grow by riskIncrImr/Mmr per level."""
+        mx = float(c.get("maxLeverage") or 1); imr0 = float(c.get("initialMarginRate") or 0); mmr0 = float(c.get("maintenanceMarginRate") or DEFAULT_MMR)
+        base, incr = float(c.get("riskBaseVol") or 0), float(c.get("riskIncrVol") or 0); n = 0
+        if base and incr and vol > base:
+            import math; n = min(int(math.ceil((vol - base) / incr)), max(0, int(c.get("riskLevelLimit") or 1) - 1))
+        imr = imr0 + n * float(c.get("riskIncrImr") or 0); mmr = mmr0 + n * float(c.get("riskIncrMmr") or 0)
+        if imr > 0: mx = min(mx, int(1 / imr + 1e-9))
+        return dict(max_lev=max(1, int(mx)), mmr=mmr)
     def symbol_of(self, s): return M.symbol_of(s)
     def client_id(self, salt, tag, ref): return f"cfx{salt or '0'}{tag}{ref}"[:32]
     def instrument(self, sym): return self.cl.contract(sym)
@@ -104,6 +130,16 @@ class Bybit(Base):
                     volUnit=float(step), volScale=_decimals(step), minVol=float(lf.get("minOrderQty") or 0),
                     maxVol=float(lf.get("maxMktOrderQty") or lf.get("maxOrderQty") or 0), maxLeverage=float(lv.get("maxLeverage") or 1),
                     minNotional=float(lf.get("minNotionalValue") or 0))
+    def tier(self, sym, c, vol, notional):
+        """Bybit risk-limit tier for this position value (riskLimitValue >= notional), else the instrument max."""
+        rl = getattr(self.cl, "risk_limits", None); tiers = []
+        try: tiers = rl(sym) if rl else []
+        except Exception: tiers = []
+        for t in tiers:
+            if float(t.get("riskLimitValue") or 0) >= float(notional):
+                return dict(max_lev=max(1, int(float(t.get("maxLeverage") or 1))), mmr=float(t.get("maintenanceMargin") or DEFAULT_MMR))
+        if tiers: t = tiers[-1]; return dict(max_lev=max(1, int(float(t.get("maxLeverage") or 1))), mmr=float(t.get("maintenanceMargin") or DEFAULT_MMR))
+        return dict(max_lev=max(1, int(float(c.get("maxLeverage") or 1))), mmr=DEFAULT_MMR)
     def fair_price(self, sym): return self.cl.mark_price(sym)
     def usdt_available(self): return self.cl.usdt_available()
     def positions(self):

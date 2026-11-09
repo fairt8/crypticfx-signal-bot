@@ -38,7 +38,9 @@ MAX_PX_DEV = float(os.getenv("AUTOTRADE_MAX_PX_DEV", "0.02"))   # MEXC vs Binanc
 FEE = float(os.getenv("AUTOTRADE_FEE", "0.0005"))               # MEXC API futures taker fee per side (announcement 2026-03-30)
 DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="limit",
                 limit_timeout_min=15, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
-                primary_exchange="mexc", failover=None, ex_on={"mexc": True, "bybit": True})   # failover None = on when Bybit keys exist
+                primary_exchange="mexc", failover=None, ex_on={"mexc": True, "bybit": True}, lev_mode="cap", size_line=True)
+ORDER_TYPES = ("limit", "market", "limit_market")   # limit_market: limit at entry; at the timeout -> market if still <= 0.5R away and valid
+OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}   # failover None = on when Bybit keys exist
 STATE = dict(last_tick=None, last_result=None, errors=collections.deque(maxlen=30), skips=collections.deque(maxlen=30), backoff_until=0, idle_until=0, perm={})
 PERM_NOTE = {"mexc": ("MEXC key can't read the account balance (code 700007). In MEXC ▸ API Management edit this key and also tick "
                       "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short.")}
@@ -131,9 +133,15 @@ def validate(patch, cur):
             s["strategies"] = [x for x in STRATS if x in v]; s["strat_on"] = on
         elif k == "risk_usdt": s[k] = round(_num(v, 0.1, 100000, "Risk per trade (USDT)"), 4)
         elif k == "max_open": s[k] = _num(v, 1, 50, "Max open trades", int)
-        elif k == "leverage": s[k] = _num(v, 1, 125, "Leverage cap", int)
+        elif k == "leverage":
+            if str(v).strip().lower() == "max": s["lev_mode"] = "max"
+            else: s[k] = _num(v, 1, 125, "Leverage cap", int); s["lev_mode"] = "cap"
+        elif k == "lev_mode":
+            if v not in ("cap", "max"): raise ValueError("leverage mode must be cap or max")
+            s[k] = v
+        elif k == "size_line": s[k] = bool(v)
         elif k == "order_type":
-            if v not in ("limit", "market"): raise ValueError("order type must be limit or market")
+            if v not in ORDER_TYPES: raise ValueError("order type must be limit, market or limit_market")
             s[k] = v
         elif k == "limit_timeout_min":
             v = _num(v, 0, 15, "Limit timeout", int)
@@ -142,6 +150,7 @@ def validate(patch, cur):
         elif k == "max_notional_usdt": s[k] = round(_num(v, 0, 10000000, "Max notional (USDT)"), 2)
         elif k == "daily_loss_usdt": s[k] = round(_num(v, 0, 10000000, "Daily loss limit (USDT)"), 2)
         else: raise ValueError(f"unknown setting: {k}")
+    if s.get("order_type") == "limit_market" and not s.get("limit_timeout_min"): s["limit_timeout_min"] = 15   # needs a timeout to switch to market
     if not s.get("salt"): s["salt"] = secrets.token_hex(2)
     s["updated_at"] = now; return s
 def save_settings(patch):
@@ -262,7 +271,7 @@ def manage(ctx, r, src, s):
     if r["status"] == "placing":   # live: create call outcome unknown (network) -> look it up by our idempotent client order id
         o = ad.order(r["contract"], r["ext_oid"])
         if o: _upd(r["id"], status="open_order", order_id=str(o.get("order_id"))); return
-        if now - _ts(r["created_at"]) > timedelta(minutes=5): _upd(r["id"], status="error", note=f"order not confirmed by {lb}")
+        if now - (_ts(r.get("updated_at")) or _ts(r["created_at"])) > timedelta(minutes=5): _upd(r["id"], status="error", note=f"order not confirmed by {lb}")
         return
     if r["status"] == "open_order":
         fill = None
@@ -281,10 +290,10 @@ def manage(ctx, r, src, s):
             cs = (r["qty"] / r["vol"]) if r["vol"] else 0
             _upd(r["id"], status="filled", filled_at=iso(now), fill_price=fill[0], vol=fill[1], qty=fill[1] * cs)
             ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'}\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing")); return
-        reason = None
-        try: to = int(json.loads(r.get("note") or "{}").get("timeout", 0))
-        except Exception: to = 0
-        if to and now - _ts(r["created_at"]) >= timedelta(minutes=to): reason = f"not filled in {to} min"
+        reason = None; timed_out = False
+        try: nt = json.loads(r.get("note") or "{}"); to = int(nt.get("timeout", 0)); conv = bool(nt.get("then_market"))
+        except Exception: to, conv = 0, False
+        if to and now - _ts(r["created_at"]) >= timedelta(minutes=to): reason = f"not filled in {to} min"; timed_out = True
         elif src is None: reason = "signal no longer tracked"
         elif don and src.get("status") != "open": reason = "DON position closed before fill"
         elif not don and src.get("status") in SIG_DONE: reason = f"signal {src.get('status')}"
@@ -297,6 +306,10 @@ def manage(ctx, r, src, s):
                     cs = (r["qty"] / r["vol"]) if r["vol"] else 0; dv = float(o["filled"])
                     _upd(r["id"], status="filled", filled_at=iso(now), fill_price=float(o.get("avg") or r["entry"]), vol=dv, qty=dv * cs)
                     ctx.msg(r, _hdr(r, "✅", "partly filled before cancel") + f"\n{dv:g} filled"); return
+            if timed_out and conv:   # Limit → Market
+                ok, why_not = _market_ok(r, src, p, don)
+                if ok: _to_market(ctx, r, p, s, to); return
+                reason += f"; no market entry: {why_not}"
             _upd(r["id"], status="cancelled", closed_at=iso(now), exit_reason=reason)
             ctx.msg(r, _hdr(r, "⌛", "limit cancelled") + f"\n<i>{reason}</i>")
         return
@@ -360,6 +373,49 @@ def candidates(s, sigs, dons, known):
                         sl=float(r["stop"]), tp=None, t=t))
     out.sort(key=lambda c: c["t"] or utcnow()); return out
 
+def _sized(ad, con, c, ref, sl, direction, s):
+    """Risk ÷ stop-distance size (exchange step / min / max position size), then leverage: cap or MAX for the size tier,
+    stepped down while the estimated liquidation price is at or inside the stop."""
+    z = M.size(c, ref, sl, s["risk_usdt"], s.get("max_notional_usdt") or 0, 10**6)
+    lev, info = X.choose_leverage(ad, con, c, z["vol"], z["notional"], ref, sl, direction, s.get("lev_mode") or "cap", s["leverage"])
+    if info.get("stepped_from"):
+        print(f"[autotrade] leverage {info['stepped_from']}x -> {lev}x on {ad.label} {con}: est. liquidation {info['liq']:g} must be beyond the stop {sl:g}", flush=True)
+    z.update(leverage=lev, margin=round(z["notional"] / lev, 4), lev_info=info); return z
+
+def _market_ok(r, src, p, don):
+    """Limit → Market at the timeout: signal still valid and price within MAX_SLIP_R (0.5R) of the entry, not beyond SL/TP."""
+    if src is None: return False, "signal no longer tracked"
+    if don and src.get("status") != "open": return False, "DON position closed"
+    if not don and src.get("status") in SIG_DONE: return False, f"signal {src.get('status')}"
+    if p is None: return False, "no live price"
+    long = r["direction"] == "long"; R = abs(float(r["entry"]) - float(r["init_sl"] or r["sl"]))
+    if (p <= r["sl"]) if long else (p >= r["sl"]): return False, "price beyond the stop"
+    if r["tp"] and ((p >= r["tp"]) if long else (p <= r["tp"])): return False, "price beyond the target"
+    if R and abs(p - float(r["entry"])) > MAX_SLIP_R * R + 1e-12: return False, f"price {abs(p - float(r['entry']))/R:.2f}R from the entry (max {MAX_SLIP_R:g}R)"
+    return True, None
+
+def _to_market(ctx, r, p, s, to):
+    """Unfilled limit (already cancelled) -> market entry on the SAME exchange, re-sized at the live price."""
+    now = ctx.now; live = not r["dry"]; ex = exof(r); ad = ctx.ad(ex); con = r["contract"]
+    c = ad.instrument(con); z = _sized(ad, con, c, p, float(r["init_sl"] or r["sl"]), r["direction"], s)
+    ext = (r["ext_oid"] + "m")[:32 if ex == "mexc" else 36]; e = M.round_price(p, c)
+    upd = dict(order_type="market", entry=e, vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"],
+               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"))))
+    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · risk {z['risk']:.2f} USDT"
+    if not live:
+        _upd(r["id"], status="filled", filled_at=iso(now), fill_price=e, **upd); ctx.msg(r, head); return
+    _upd(r["id"], status="placing", **upd)
+    try:
+        oid = ad.place_open(con, r["direction"], z["vol"], e, True, z["leverage"], r["sl"], r["tp"], ext)
+        _upd(r["id"], status="open_order", order_id=oid); ctx.msg(r, head)
+    except (M.RateLimited, B.RateLimited): raise
+    except Exception as x:
+        if X.kind(x) is None and isinstance(x, (M.MexcError, B.BybitError)):
+            _upd(r["id"], status="error", closed_at=iso(now), note=json.dumps(dict(error=f"market entry rejected {x.code}: {x.msg}"[:200])))
+            ctx.msg(r, _hdr(r, "⚠️", "market entry rejected") + f"\n<code>{x.code}</code> {str(x.msg)[:150]}")
+        else:   # unknown: stays 'placing', resolved by client order id (or error after 5 min)
+            _err(f"market entry {con} on {ad.label}", x)
+
 def _perm(ctx, ex, s):
     """Remember + (max every 12 h, live only) tell the user that the key lacks the balance permission."""
     STATE["perm"][ex] = PERM_NOTE.get(ex, f"{X.LABEL.get(ex, ex)} key lacks a permission")
@@ -403,7 +459,7 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     market = s["order_type"] == "market"
     if market and R and abs(p - entry) > MAX_SLIP_R * R: raise M.Skip(f"price moved {abs(p-entry)/R:.2f}R from the entry")
     ref = p if market else entry
-    z = M.size(c, ref, sl, s["risk_usdt"], s.get("max_notional_usdt") or 0, s["leverage"])
+    z = _sized(ad, con, c, ref, sl, cnd["direction"], s)
     if live:
         try:
             fp = ad.fair_price(con)
@@ -418,12 +474,12 @@ def _open_on(ctx, s, cnd, ad, rid, why):
             raise
     tag = "s" if cnd["source"] == "sig" else cnd["source"][-2:]
     ext = ad.client_id(s.get("salt"), tag, cnd["ref_id"])
-    to = 0 if market else int(s.get("limit_timeout_min") or 0)
+    to = 0 if market else int(s.get("limit_timeout_min") or 0); conv = s["order_type"] == "limit_market"
     via = f" via {ad.label} (backup)" if why else ""
     row = dict(strategy=cnd["strategy"], symbol=cnd["symbol"], contract=con, direction=cnd["direction"], exchange=ex,
-               order_type="market" if market else "limit", entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
+               order_type="market" if market else s["order_type"], entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
                init_sl=float(sl), vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"], ext_oid=ext,
-               dry=0 if live else 1, note=json.dumps(dict(timeout=to, **({"failover": "; ".join(why)[:200]} if why else {}))))
+               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}))))
     full = dict(row, source=cnd["source"], ref_id=cnd["ref_id"])
     fo_line = ("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else ""
     if not live:   # dry-run: no private call; market fills at the live price now, limit waits for the fill
@@ -605,36 +661,42 @@ def panel_text():
     try: v = view()
     except Exception as e: _err("panel view", e)
     st = "🟢 <b>ON</b>" if s["enabled"] else "🔴 <b>OFF</b>"; md = "🧪 dry-run (no real orders)" if s["dry_run"] else "💸 <b>LIVE</b> (real orders)"
-    ot = "market" if s["order_type"] == "market" else ("limit at entry · " + (f"cancel if not filled in {s['limit_timeout_min']} min" if s["limit_timeout_min"] else "no timeout"))
+    ot = ("market" if s["order_type"] == "market" else
+          f"limit at entry · market at {s['limit_timeout_min']} min if still ≤{MAX_SLIP_R:g}R away" if s["order_type"] == "limit_market" else
+          "limit at entry · " + (f"cancel if not filled in {s['limit_timeout_min']} min" if s["limit_timeout_min"] else "no timeout"))
+    lv = "MAX per coin (liq. kept beyond the stop)" if s.get("lev_mode") == "max" else f"≤ {s['leverage']}x"
     pri = s.get("primary_exchange") or "mexc"; bk = [x for x in X.NAMES if x != pri][0]
     def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · disabled")
     L = ["🤖 <b>Auto-trade · MEXC futures + Bybit backup</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
          f"🏦 Primary <b>{X.LABEL[pri]}</b> · backup <b>{X.LABEL[bk]}</b>: failover {'ON' if failover_on(s) else 'OFF'}" + ("" if s.get("failover") is not None else " (auto)"),
          f"🔑 {kl('mexc')} · {kl('bybit')}",
-         f"💵 Risk <b>{s['risk_usdt']:g} USDT</b>/trade · max open <b>{s['max_open']}</b> · leverage ≤ <b>{s['leverage']}x</b>",
+         f"💵 Risk <b>{s['risk_usdt']:g} USDT</b>/trade · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
          f"🧾 Order: {esc(ot)}",
-         f"🧱 Max notional: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
+         f"🧱 Max position size: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} <i>(caps qty × price per trade)</i> · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
+         f"📐 Size line on signal alerts: {'ON' if s.get('size_line', True) else 'OFF'}",
          "📋 Strategies: " + (esc(", ".join(s["strategies"])) if s["strategies"] else "<i>none</i>")]
     if v:
         b = v["dry"] if s["dry_run"] else v["live"]
         L.append(f"📈 Open {b['open']} · pending {b['pending']} · today {b['today_usdt']:+.2f} · all {b['pnl_usdt']:+.2f} USDT ({b['closed']} closed)")
     for n, note in STATE["perm"].items(): L.append("⚠️ " + esc(note))
     L += ["", "<i>Signals and alerts are never paused or changed by auto-trade. Each trade stays on the exchange it was opened on.</i>",
-          "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> · <code>notional 100</code> · <code>dailyloss 20</code> (0 = off)"]
+          "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> or <code>lev max</code> · <code>size 100</code> (max position size) · <code>dailyloss 20</code> (0 = off) · <code>sizeline on|off</code>"]
     return "\n".join(L)
 def panel_markup():
     s = settings(); B = lambda t, d: {"text": t, "callback_data": d}
     rows = [[B("🔴 Turn OFF" if s["enabled"] else "🟢 Turn ON", "at:en"), B("💸 Go LIVE…" if s["dry_run"] else "🧪 Back to dry-run", "at:dr")]]
     ks = [B(("✅ " if k in s["strategies"] else "⬜ ") + k, "at:s:" + k) for k in STRATS]
     rows += [ks[i:i+3] for i in range(0, len(ks), 3)]
-    rows.append([B(("● " if s["order_type"] == "limit" else "") + "Limit", "at:ot:limit"), B(("● " if s["order_type"] == "market" else "") + "Market", "at:ot:market")])
+    rows.append([B(("● " if s["order_type"] == k else "") + OT_LABEL[k], "at:ot:" + k) for k in ORDER_TYPES])
+    rows.append([B(("● " if s.get("lev_mode") != "max" else "") + f"Lev ≤{s['leverage']}x", "at:lv:cap"), B(("● " if s.get("lev_mode") == "max" else "") + "Lev MAX", "at:lv:max"),
+                 B(("✅" if s.get("size_line", True) else "⬜") + " Size line", "at:sz")])
     rows.append([B(("● " if s["limit_timeout_min"] == t else "") + (f"{t} min" if t else "No timeout"), f"at:to:{t}") for t in (5, 10, 15, 0)])
     pri = s.get("primary_exchange") or "mexc"
     rows.append([B(f"🏦 Primary: {X.LABEL[pri]} ⇄", "at:px"), B(("✅" if failover_on(s) else "⬜") + " Failover", "at:fo")])
     rows.append([B(("✅ " if ex_on(s, n) else "⬜ ") + X.LABEL[n], "at:x:" + n) for n in X.NAMES])
     rows.append([B("🛑 Flatten all…", "at:fl"), B("↻ Refresh", "at:rf")])
     return {"inline_keyboard": rows}
-NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt",
+NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt", "size": "max_notional_usdt",
        "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min"}
 def tg_command(text):
     """/autotrade [on|off|risk N|maxopen N|lev N|notional N|dailyloss N|timeout N] -> (reply text, markup or None)."""
@@ -644,11 +706,12 @@ def tg_command(text):
             w = a[0].lower()
             if w in ("on", "off"): save_settings(dict(enabled=w == "on"))
             elif w in NUM and len(a) > 1: save_settings({NUM[w]: a[1]})
-            elif w in ("limit", "market"): save_settings(dict(order_type=w))
+            elif w in ("limit", "market", "limit_market", "limitmarket"): save_settings(dict(order_type="limit_market" if w.startswith("limit") and w != "limit" else w))
+            elif w == "sizeline" and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(size_line=a[1].lower() == "on"))
             elif w == "primary" and len(a) > 1: save_settings(dict(primary_exchange=a[1].lower()))
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
-            else: return ("Usage: /autotrade [on|off|limit|market|risk N|maxopen N|lev N|notional N|dailyloss N|timeout 5|10|15|0|"
+            else: return ("Usage: /autotrade [on|off|limit|market|limit_market|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
                           "primary mexc|bybit|failover on|off|auto|mexc on|off|bybit on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
@@ -674,6 +737,8 @@ def tg_callback(data):
         if d == "fo": s = save_settings(dict(failover=not failover_on(s))); return "Failover " + ("ON" if s["failover"] else "OFF"), panel_text(), panel_markup(), None
         if d.startswith("x:") and d[2:] in X.NAMES: n = d[2:]; save_settings(dict(ex_on={n: not ex_on(s, n)})); return f"{X.LABEL[n]} {'on' if ex_on(settings(0), n) else 'off'}", panel_text(), panel_markup(), None
     except ValueError as e: return str(e)[:190], None, None, None
+    if d.startswith("lv:"): save_settings(dict(lev_mode=d[3:])); return "Leverage: " + ("MAX" if d[3:] == "max" else f"≤{s['leverage']}x"), panel_text(), panel_markup(), None
+    if d == "sz": s = save_settings(dict(size_line=not s.get("size_line", True))); return "Size line " + ("ON" if s["size_line"] else "OFF"), panel_text(), panel_markup(), None
     if d.startswith("ot:"): save_settings(dict(order_type=d[3:])); return "Order type: " + d[3:], panel_text(), panel_markup(), None
     if d.startswith("to:"): save_settings(dict(limit_timeout_min=int(d[3:]))); return "Limit timeout set", panel_text(), panel_markup(), None
     if d == "fl":
