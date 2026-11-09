@@ -257,7 +257,7 @@ def send_autotrade_panel(text, chat_id=None):
     """/autotrade and /flatten (auto-trade add-on). Own try/except: never affects signal posting."""
     from . import autotrade
     if text.split()[0].split("@")[0].lower() == "/flatten":
-        body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text="🛑 <b>Flatten all auto trades?</b> Turns auto-trade OFF, cancels pending auto limits and market-closes every auto position on MEXC. Manual positions are not touched.",
+        body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text="🛑 <b>Flatten all auto trades?</b> Turns auto-trade OFF, cancels pending auto limits and market-closes every auto position on the exchange it was opened on (MEXC or Bybit). Manual positions are not touched.",
                     reply_markup={"inline_keyboard": [[{"text": "🛑 Yes, flatten all", "callback_data": "at:flx"}, {"text": "Cancel", "callback_data": "at:no"}]]})
         return requests.post(API("sendMessage"), json=body, timeout=20).ok
     out, markup = autotrade.tg_command(text)
@@ -277,7 +277,7 @@ def help_html():
         "  /pnl SYMBOL · /trades SYMBOL – one token\n  /don20 · /don28 – DON20 ⭐ / DON28 🔷 total PnL\n  /stats – 30-day stats by tier\n\n"
         "🧭 <b>More</b>\n  /strategies – tiers + live verdicts\n  /retired – retired strategy history\n"
         "  /explain ID – full signal card + AI note\n  /ask question – ask AI\n  📱 /app – the Mini App (also the ☰ button)\n\n"
-        "🤖 <b>Auto-trade (MEXC)</b>\n  /autotrade – settings + strategy switches\n  /autotrade off – stop new auto orders\n  /flatten – close all auto trades (asks first)")
+        "🤖 <b>Auto-trade (MEXC + Bybit backup)</b>\n  /autotrade – settings, strategy + exchange switches\n  /autotrade off – stop new auto orders\n  /flatten – close all auto trades (asks first)")
 HELP = "/signals – open/pending signals\n/primary · /secondary – one tier\n/alerts – alert mode\n/stats – 30-day stats\n/help – all commands"
 def cmd_stats():
     from . import strategies as SG
@@ -371,7 +371,7 @@ def set_menu_button():
     set_commands()
 COMMANDS = [("signals", "📡 Open + pending signals by tier"), ("primary", "⭐ PRIMARY signals"), ("secondary", "🔷 SECONDARY signals"),
             ("alerts", "🔔 Push ⭐ only or ⭐ + 🔷"), ("open", "📈 Live trades with PnL"), ("closed", "🏁 Closed results"), ("stats", "📊 30-day stats by tier"),
-            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("autotrade", "🤖 MEXC auto-trade settings"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
+            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("autotrade", "🤖 Auto-trade settings (MEXC + Bybit)"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
 def set_commands():
     """Owner chat's / command menu (setMyCommands, chat scope). Best effort."""
     try:

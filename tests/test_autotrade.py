@@ -1,11 +1,12 @@
 """Auto-trade add-on tests (mocked MEXC, temp SQLite). Run: python -m pytest -q tests/test_autotrade.py
 Never touches Telegram, Neon or MEXC: env is blanked before the app is imported."""
 import os, sys, json, hmac, hashlib, threading, time
-os.environ.update(DATABASE_URL="", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="1", MEXC_API_KEY="", MEXC_API_SECRET="", AUTOTRADE_WORKER="0", ENABLE_SCHEDULER="0")
+os.environ.update(DATABASE_URL="", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="1", MEXC_API_KEY="", MEXC_API_SECRET="", BYBIT_API_KEY="", BYBIT_API_SECRET="", AUTOTRADE_WORKER="0", ENABLE_SCHEDULER="0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone, timedelta
 import pytest
-from app import config as C, db, don20, mexc as M, autotrade as A, telegram
+import requests
+from app import config as C, db, don20, mexc as M, bybit as BY, exchanges as X, autotrade as A, telegram
 
 CON = {"BTC_USDT": dict(symbol="BTC_USDT", contractSize=0.0001, priceUnit=0.1, priceScale=1, volUnit=1, volScale=0, minVol=1, maxVol=400000, maxLeverage=500, apiAllowed=True, state=0),
        "SOL_USDT": dict(symbol="SOL_USDT", contractSize=0.1, priceUnit=0.01, priceScale=2, volUnit=1, volScale=0, minVol=1, maxVol=100000, maxLeverage=200, apiAllowed=True, state=0),
@@ -48,7 +49,8 @@ def fresh(tmp_path, monkeypatch):
     A._S.update(t=0, v=None); A._TBL["ok"] = False; A._ERRSENT.clear()
     A.STATE.update(last_tick=None, last_result=None, backoff_until=0, idle_until=0); A.STATE["errors"].clear(); A.STATE["skips"].clear(); A.STATE.pop("loss_day", None)
     sent = []; monkeypatch.setattr(telegram, "send", lambda t, chat_id=None, html=False: sent.append(t) or True)
-    monkeypatch.setattr(M, "key_present", lambda: False)
+    monkeypatch.setattr(M, "key_present", lambda: False); monkeypatch.setattr(BY, "key_present", lambda: False)
+    A.STATE["perm"].clear()
     yield sent
 
 def sig(symbol="BTCUSDT", strategy="BRK", direction="long", entry=100000.0, sl=99000.0, tp=103000.0, status="pending", ct=None):
@@ -278,7 +280,8 @@ def test_startup_survives_autotrade_failure(monkeypatch):
 def test_signal_modules_do_not_import_autotrade():
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app")
     for f in ("scanner.py", "outcomes.py", "don20.py", "alerts.py", "strategy.py", "patterns_live.py", "desk.py", "trades.py", "summary.py", "db.py"):
-        assert "autotrade" not in open(os.path.join(root, f)).read(), f
+        src = open(os.path.join(root, f)).read()
+        for mod in ("autotrade", "bybit", "exchanges", "mexc"): assert mod not in src, (f, mod)
 
 def test_telegram_panel_and_callbacks(monkeypatch):
     t, mk = A.tg_command("/autotrade"); assert "OFF" in t and mk["inline_keyboard"]
@@ -290,3 +293,217 @@ def test_telegram_panel_and_callbacks(monkeypatch):
     assert "⚠️" in A.tg_command("/autotrade lev 999")[0]
     _, _, _, extra = A.tg_callback("at:fl"); assert "Flatten" in extra[0]
     A.tg_command("/autotrade off"); assert not A.settings(0)["enabled"]
+
+
+# =================== Bybit backup exchange / failover ===================
+BYI = {"BTCUSDT": dict(symbol="BTCUSDT", status="Trading", priceScale="2", priceFilter=dict(tickSize="0.10"), lotSizeFilter=dict(qtyStep="0.001", minOrderQty="0.001", maxMktOrderQty="100", minNotionalValue="5"), leverageFilter=dict(maxLeverage="100")),
+       "SOLUSDT": dict(symbol="SOLUSDT", status="Trading", priceScale="3", priceFilter=dict(tickSize="0.010"), lotSizeFilter=dict(qtyStep="0.1", minOrderQty="0.1", maxMktOrderQty="10000", minNotionalValue="5"), leverageFilter=dict(maxLeverage="50")),
+       "ONLYBYUSDT": dict(symbol="ONLYBYUSDT", status="Trading", priceScale="4", priceFilter=dict(tickSize="0.0001"), lotSizeFilter=dict(qtyStep="1", minOrderQty="1", maxMktOrderQty="1000000", minNotionalValue="5"), leverageFilter=dict(maxLeverage="25"))}
+
+class FakeBybit:
+    """Mock raw Bybit client (same methods as app.bybit.Client)."""
+    def __init__(self, private_ok=True):
+        self.private_ok = private_ok; self.calls = []; self.orders = {}; self.pos = []; self._idx = {}; self.down = None
+    def _p(self, name, *a, **k):
+        if not self.private_ok: raise AssertionError(f"private Bybit call in dry-run: {name}")
+        if self.down: raise self.down
+        self.calls.append((name, a, k))
+    def ping(self):
+        if self.down: raise self.down
+        return True
+    def instruments(self): return BYI
+    def mark_price(self, sym): return None
+    def usdt_available(self): self._p("usdt_available"); return 10000.0
+    def positions(self): self._p("positions"); return list(self.pos)
+    def set_leverage(self, sym, lev): self._p("set_leverage", sym, lev)
+    def create_order(self, **b):
+        self._p("create_order", **b); oid = "B" + str(len(self.orders) + 1)
+        if not b.get("reduceOnly"): self.orders[b["orderLinkId"]] = dict(orderId=oid, orderStatus="Filled" if b["orderType"] == "Market" else "New", cumExecQty=b["qty"] if b["orderType"] == "Market" else "0", avgPrice=b.get("price") or "0")
+        return oid
+    def order_by_link(self, sym, link): self._p("order_by_link", sym, link); return self.orders.get(link)
+    def cancel_link(self, sym, link):
+        self._p("cancel_link", sym, link)
+        if link in self.orders: self.orders[link]["orderStatus"] = "Cancelled"
+    def trading_stop(self, sym, idx, sl=None, tp=None): self._p("trading_stop", sym, idx, sl=sl, tp=tp)
+    def n(self, name): return sum(1 for c in self.calls if c[0] == name)
+
+class DownMexc(Fake):
+    """MEXC mock whose health ping fails."""
+    def ping(self): raise requests.exceptions.ConnectTimeout("connect timeout")
+
+def both_live(monkeypatch, **kw):
+    monkeypatch.setattr(M, "key_present", lambda: True); monkeypatch.setattr(BY, "key_present", lambda: True)
+    enable(**kw); return A.save_settings(dict(dry_run=False))
+def creates(fk): return [c[2] for c in fk.calls if c[0] == "create_order"]
+
+def test_bybit_signing_headers_and_query():
+    class S:
+        def __init__(s): s.req = None
+        def request(s, method, url, headers=None, data=None, timeout=None):
+            s.req = (method, url, headers, data)
+            class R: status_code = 200; json = staticmethod(lambda: {"retCode": 0, "retMsg": "OK", "result": {"orderId": "o1", "list": []}})
+            return R()
+    se = S(); cl = BY.Client(key="BK", secret="BS", session=se, min_gap_s=0, recv_window=5000)
+    assert "BK" not in repr(cl) and "BS" not in repr(cl)
+    cl.private("GET", "/v5/order/realtime", params=dict(symbol="BTCUSDT", category="linear", orderLinkId="cfx1", cursor=None))
+    m, url, h, data = se.req
+    assert url.endswith("/v5/order/realtime?category=linear&orderLinkId=cfx1&symbol=BTCUSDT") and data is None
+    assert h["X-BAPI-SIGN"] == hmac.new(b"BS", (h["X-BAPI-TIMESTAMP"] + "BK" + "5000" + "category=linear&orderLinkId=cfx1&symbol=BTCUSDT").encode(), hashlib.sha256).hexdigest()
+    assert h["X-BAPI-API-KEY"] == "BK" and h["X-BAPI-RECV-WINDOW"] == "5000"
+    assert cl.create_order(symbol="BTCUSDT", side="Buy", orderType="Limit", qty="0.01", price="100000", stopLoss=None) == "o1"
+    m, url, h, data = se.req
+    assert json.loads(data)["category"] == "linear" and "stopLoss" not in data
+    assert h["X-BAPI-SIGN"] == hmac.new(b"BS", (h["X-BAPI-TIMESTAMP"] + "BK" + "5000" + data).encode(), hashlib.sha256).hexdigest()
+
+def test_bybit_error_parsing():
+    class R:
+        def __init__(s, code, j): s.status_code = code; s._j = j
+        def json(s): return s._j
+    cl = BY.Client(key="a", secret="b")
+    with pytest.raises(BY.RateLimited): cl._parse(R(200, {"retCode": 10006, "retMsg": "too many"}))
+    with pytest.raises(BY.BybitError) as e: cl._parse(R(403, {}))
+    assert X.kind(e.value) == "server"
+    with pytest.raises(BY.BybitError) as e: cl._parse(R(200, {"retCode": 110007, "retMsg": "Available balance is insufficient"}))
+    assert X.kind(e.value) is None
+    assert X.kind(requests.exceptions.ConnectTimeout("x")) == "not_sent" and X.kind(requests.exceptions.ReadTimeout("x")) == "unknown"
+    assert X.kind(M.MexcError(9999, "x")) == "server" and X.kind(M.MexcError(2005, "x")) is None and X.kind(ConnectionError("x")) == "unknown"
+
+def test_bybit_precision_and_sizing():
+    ad = X.Bybit(FakeBybit()); c = ad.instrument("BTCUSDT")
+    assert c["volUnit"] == 0.001 and c["volScale"] == 3 and c["priceUnit"] == 0.1 and c["minNotional"] == 5
+    z = M.size(c, 100000, 99000, 10.5); assert z["vol"] == 0.01 and abs(z["risk"] - 10) < 1e-9   # 0.0105 floored to the 0.001 step
+    assert M.round_price(100000.06, c) == 100000.1 and BY.dstr(0.01) == "0.01" and BY.dstr(1e-05) == "0.00001" and BY.dstr(100000.0) == "100000"
+    with pytest.raises(M.Skip): M.size(ad.instrument("SOLUSDT"), 10, 9, 0.2)   # 0.2 qty * $10 = $2 < $5 minimum order value
+    with pytest.raises(M.NotListed): ad.instrument("NOPEUSDT")
+
+def test_mexc_get_signing_includes_query_params():
+    class S:
+        def __init__(s): s.req = None
+        def request(s, method, url, headers=None, data=None, timeout=None):
+            s.req = (method, url, headers, data)
+            class R: status_code = 200; json = staticmethod(lambda: {"success": True, "code": 0, "data": []})
+            return R()
+    se = S(); cl = M.Client(key="AK", secret="SK", session=se, min_gap_s=0)
+    cl.open_orders("BTC_USDT")
+    m, url, h, data = se.req
+    assert url.endswith("/api/v1/private/order/list/open_orders/BTC_USDT?page_num=1&page_size=50")
+    assert h["Signature"] == hmac.new(b"SK", ("AK" + h["Request-Time"] + "page_num=1&page_size=50").encode(), hashlib.sha256).hexdigest()
+    assert h["Signature"] != hmac.new(b"SK", ("AK" + h["Request-Time"]).encode(), hashlib.sha256).hexdigest()   # params are signed (else 602)
+
+def test_failover_when_mexc_health_check_fails(monkeypatch, fresh):
+    both_live(monkeypatch); sig(); fk, fb = DownMexc(), FakeBybit()
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["exchange"] == "bybit" and r["status"] == "open_order" and fk.n("create_order") == 0
+    (b,) = creates(fb)
+    assert b["side"] == "Buy" and b["orderType"] == "Limit" and b["qty"] == "0.01" and b["price"] == "100000" and b["positionIdx"] == 0
+    assert b["tpslMode"] == "Full" and b["stopLoss"] == "99000" and b["takeProfit"] == "103000" and b["orderLinkId"] == r["ext_oid"] and len(b["orderLinkId"]) <= 36
+    assert fb.n("set_leverage") == 1 and any("Backup" in t and "health check failed" in t for t in fresh)
+
+def test_failover_when_connection_never_opened(monkeypatch):
+    both_live(monkeypatch); sig(); fk, fb = Fake(), FakeBybit(); fk.fail_create = requests.exceptions.ConnectTimeout("connect timed out")
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0))
+    assert len(rows()) == 1 and rows()[0]["exchange"] == "bybit" and fk.n("create_order") == 1 and fb.n("create_order") == 1
+    assert fk.n("order_by_ext") == 1   # MEXC asked by client order id first
+
+def test_failover_on_5xx_only_after_mexc_confirms_no_order(monkeypatch):
+    both_live(monkeypatch); sig(); fk, fb = Fake(), FakeBybit(); fk.fail_create = M.MexcError(503, "Service Unavailable", 503)
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0))
+    assert rows()[0]["exchange"] == "bybit" and fb.n("create_order") == 1
+
+def test_no_failover_when_mexc_state_unknown(monkeypatch, fresh):
+    both_live(monkeypatch); sig(); fk, fb = Fake(), FakeBybit(); fk.fail_create = requests.exceptions.ReadTimeout("read timed out")
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["exchange"] == "mexc" and r["status"] == "placing" and fb.n("create_order") == 0 and any("state unknown" in t for t in fresh)
+    fk.orders[r["ext_oid"]] = dict(orderId="777", state=2, dealVol=0)       # it had reached MEXC after all
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0))
+    assert rows()[0]["status"] == "open_order" and rows()[0]["order_id"] == "777" and fb.n("create_order") == 0
+
+def test_no_failover_when_5xx_and_lookup_fails(monkeypatch):
+    both_live(monkeypatch); sig(); fb = FakeBybit()
+    class F(Fake):
+        def order_by_ext(self, sym, ext): raise requests.exceptions.ReadTimeout("lookup timed out")
+    fk = F(); fk.fail_create = M.MexcError(500, "Internal error", 500)
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0))
+    assert rows()[0]["exchange"] == "mexc" and rows()[0]["status"] == "placing" and fb.n("create_order") == 0
+
+def test_business_rejection_does_not_fail_over(monkeypatch):
+    both_live(monkeypatch); sig(); fk, fb = Fake(), FakeBybit(); fk.fail_create = M.MexcError(2005, "Balance insufficient")
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0))
+    assert rows()[0]["status"] == "error" and rows()[0]["exchange"] == "mexc" and fb.n("create_order") == 0
+
+def test_symbol_missing_on_mexc_routes_to_bybit(monkeypatch):
+    both_live(monkeypatch); sig(symbol="ONLYBYUSDT", entry=1.0, sl=0.9, tp=1.3); fk, fb = Fake(), FakeBybit()
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(1.01)); r = rows()[0]
+    assert r["exchange"] == "bybit" and r["contract"] == "ONLYBYUSDT" and fk.n("create_order") == 0 and creates(fb)[0]["qty"] == "100"
+
+def test_failover_off_or_no_bybit_key(monkeypatch):
+    both_live(monkeypatch); A.save_settings(dict(failover=False)); sig(); fk, fb = DownMexc(), FakeBybit()
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["status"] == "skipped" and "health check failed" in json.loads(r["note"])["skip"] and fb.calls == []
+    A.save_settings(dict(failover=None)); monkeypatch.setattr(BY, "key_present", lambda: False)   # auto = on only with Bybit keys
+    assert A.failover_on(A.settings(0)) is False and A.route(A.settings(0), {"mexc": 1, "bybit": 1}) == ["mexc"]
+
+def test_exits_and_stops_managed_on_the_opening_exchange(monkeypatch):
+    both_live(monkeypatch, order_type="market", strategies=["FVG+TREND"]); fk, fb = DownMexc(), FakeBybit()
+    i = sig(symbol="SOLUSDT", strategy="FVG+TREND", entry=150, sl=148, tp=156, status="open")
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(150.1)); r = rows()[0]
+    assert r["exchange"] == "bybit" and creates(fb)[0]["orderType"] == "Market" and creates(fb)[0]["timeInForce"] == "IOC"
+    fk2 = Fake()                                                                     # MEXC is back: trade must stay on Bybit
+    fb.pos = [dict(symbol="SOLUSDT", side="Buy", size=str(r["vol"]), positionIdx=0, avgPrice="150.1", tradeMode=1)]
+    A.tick(cl={"mexc": fk2, "bybit": fb}, px_fn=PX(150.3)); assert rows()[0]["status"] == "filled"
+    db.update(i, sl=149.0, tp=153.0); A.tick(cl={"mexc": fk2, "bybit": fb}, px_fn=PX(150.3))
+    ts = [c for c in fb.calls if c[0] == "trading_stop"]; assert ts and ts[-1][2] == dict(sl=149.0, tp=153.0)
+    db.update(i, status="sl", closed_at=datetime.now(timezone.utc).isoformat(), result_r=-1.0)
+    A.tick(cl={"mexc": fk2, "bybit": fb}, px_fn=PX(148.9))
+    close = [b for b in creates(fb) if b.get("reduceOnly")]
+    assert close and close[-1]["side"] == "Sell" and close[-1]["orderType"] == "Market" and float(close[-1]["qty"]) == r["vol"]
+    assert rows()[0]["status"] == "closed" and fk2.calls == [] and fk.calls == []
+
+def test_exit_retries_when_opening_exchange_is_down(monkeypatch, fresh):
+    both_live(monkeypatch, order_type="market"); i = sig(status="open"); fk, fb = Fake(), FakeBybit()
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100100.0)); assert rows()[0]["exchange"] == "mexc"
+    fk.positions = [dict(symbol="BTC_USDT", positionType=1, holdVol=rows()[0]["vol"], positionId=1)]
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100100.0)); assert rows()[0]["status"] == "filled"
+    db.update(i, status="tp", closed_at=datetime.now(timezone.utc).isoformat(), result_r=3.0)
+    class Down(Fake):
+        def open_positions(self, sym=None): raise requests.exceptions.ConnectionError("Failed to establish a new connection")
+    dn = Down(); dn.orders = fk.orders
+    A.tick(cl={"mexc": dn, "bybit": fb}, px_fn=PX(103100.0))
+    assert rows()[0]["status"] == "filled" and fb.calls == [] and any("unreachable" in t and "still protect" in t for t in fresh)
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(103100.0))                     # back up -> closed on MEXC, never on Bybit
+    assert rows()[0]["status"] == "closed" and any(b["side"] == 4 for b in creates(fk)) and fb.n("create_order") == 0
+
+def test_mexc_700007_balance_permission_note(monkeypatch, fresh):
+    both_live(monkeypatch); sig()
+    class NoBal(Fake):
+        def usdt_available(self): raise M.NoPermission(700007, "No permission to access the endpoint")
+    fk = NoBal(); A.tick(cl={"mexc": fk, "bybit": FakeBybit()}, px_fn=PX(100500.0))
+    assert rows()[0]["status"] == "open_order" and rows()[0]["exchange"] == "mexc"     # placed; MEXC itself checks margin
+    assert any("View Account Details" in t for t in fresh) and "mexc" in A.STATE["perm"]
+    monkeypatch.setattr(A, "prices", lambda syms: {s: 100500.0 for s in syms})
+    v = A.view(); assert [e for e in v["exchanges"] if e["name"] == "mexc"][0]["perm_note"] and "700007" in A.panel_text()
+    class R:
+        status_code = 200
+        def json(s): return {"success": False, "code": 700007, "message": "No permission"}
+    with pytest.raises(M.NoPermission): M.Client(key="a", secret="b")._parse(R())
+
+def test_dry_run_failover_uses_no_private_calls(monkeypatch):
+    enable(); A.save_settings(dict(failover=True)); sig(); fk, fb = DownMexc(private_ok=False), FakeBybit(private_ok=False)
+    A.tick(cl={"mexc": fk, "bybit": fb}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["exchange"] == "bybit" and r["dry"] == 1 and r["vol"] == 0.01 and fb.calls == [] and fk.calls == []
+
+def test_exchange_settings_and_panel(monkeypatch):
+    s = A.settings(0); assert s["primary_exchange"] == "mexc" and s["failover"] is None and s["enabled"] is False and s["dry_run"] is True
+    with pytest.raises(ValueError): A.save_settings(dict(primary_exchange="binance"))
+    with pytest.raises(ValueError): A.save_settings(dict(ex_on={"mexc": False, "bybit": False}))
+    A.tg_callback("at:px"); assert A.settings(0)["primary_exchange"] == "bybit"
+    A.tg_command("/autotrade primary mexc"); A.tg_command("/autotrade failover off"); A.tg_command("/autotrade bybit off")
+    s = A.settings(0); assert s["primary_exchange"] == "mexc" and s["failover"] is False and s["ex_on"] == {"mexc": True, "bybit": False}
+    A.tg_callback("at:x:bybit"); A.tg_callback("at:fo"); s = A.settings(0); assert s["ex_on"]["bybit"] and s["failover"] is True
+    t, mk = A.tg_command("/autotrade"); assert "Bybit" in t and any(b["callback_data"] == "at:fo" for row in mk["inline_keyboard"] for b in row)
+    assert A.settings(0)["enabled"] is False   # exchange controls never switch auto-trade on
+
+def test_old_rows_without_exchange_are_mexc(monkeypatch):
+    A.ensure_table(); A._insert(source="sig", ref_id=5, strategy="BRK", symbol="BTCUSDT", direction="long", status="closed", dry=1, pnl_usdt=1.0, closed_at=datetime.now(timezone.utc).isoformat())
+    assert A.exof(rows()[0]) == "mexc"
+    A._TBL["ok"] = False; A.ensure_table(); A.ensure_table()   # migration is idempotent

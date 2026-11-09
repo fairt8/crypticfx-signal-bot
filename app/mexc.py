@@ -21,8 +21,14 @@ class MexcError(Exception):
     def __init__(self, code, msg, http=None):
         super().__init__(f"MEXC {code}: {msg}"); self.code = code; self.msg = msg; self.http = http
 class RateLimited(MexcError): pass
+class NoPermission(MexcError):
+    """The API key lacks a permission for this endpoint (MEXC 700007, e.g. "View Account Details" for balances)."""
 class Skip(Exception):
     """A signal that can't be traded (reason in str(e)); not an error."""
+class NotListed(Skip):
+    """The symbol is not tradable by API on this exchange (not listed / API not allowed / not enabled) -> backup may take it."""
+PERM_CODES = (700007,)
+SERVER_CODES = (500, 501, 502, 503, 504, 511, 9999)   # internal error / system busy / maintenance / public abnormal
 
 def key_present():
     return bool(os.getenv("MEXC_API_KEY", "").strip() and os.getenv("MEXC_API_SECRET", "").strip())
@@ -57,9 +63,12 @@ def size(c, entry, sl, risk_usdt, max_notional=0.0, lev_cap=5):
     vol = floor_vol(risk_usdt / dist / cs, c)
     if max_notional and max_notional > 0:
         vol = min(vol, floor_vol(max_notional / (entry * cs), c))
-    mn = float(c.get("minVol") or 0)
+    mn = float(c.get("minVol") or 0); ex = c.get("_ex") or "MEXC"; unit = "contract" if ex == "MEXC" else "qty"
     if vol <= 0 or vol < mn:
-        raise Skip(f"risk ${risk_usdt:g} is below MEXC's minimum size ({mn:g} contract = ${mn*cs*dist:.2f} risk at this stop)")
+        raise Skip(f"risk ${risk_usdt:g} is below {ex}'s minimum size ({mn:g} {unit} = ${mn*cs*dist:.2f} risk at this stop)")
+    mnn = float(c.get("minNotional") or 0)
+    if mnn and vol * cs * entry < mnn:
+        raise Skip(f"order value ${vol*cs*entry:.2f} is below {ex}'s minimum (${mnn:g}); raise the risk per trade")
     mx = float(c.get("maxVol") or 0)
     if mx and vol > mx: vol = floor_vol(mx, c)
     lev = int(max(1, min(int(lev_cap or 1), int(c.get("maxLeverage") or lev_cap or 1))))
@@ -90,7 +99,9 @@ class Client:
         if isinstance(j, dict) and j.get("success") is False:
             code = j.get("code"); msg = j.get("message") or j.get("msg") or "error"
             if code in (510, 2037): raise RateLimited(code, msg, r.status_code)
+            if code in PERM_CODES: raise NoPermission(code, msg, r.status_code)
             raise MexcError(code, msg, r.status_code)
+        if r.status_code >= 500: raise MexcError(r.status_code, f"HTTP {r.status_code}", r.status_code)
         return j.get("data") if isinstance(j, dict) and "data" in j else j
     def public(self, path, params=None):
         r = self.http.get(self.base + path, params=params or None, timeout=15); return self._parse(r)
@@ -114,10 +125,12 @@ class Client:
     def contract(self, sym):
         """Tradable contract detail or raise Skip (not listed / API not allowed / not enabled)."""
         c = self.contracts().get(sym)
-        if not c: raise Skip(f"{sym} is not listed on MEXC futures")
-        if c.get("apiAllowed") is False: raise Skip(f"{sym} does not allow API trading")
-        if int(c.get("state") or 0) != 0: raise Skip(f"{sym} is not enabled (state {c.get('state')})")
+        if not c: raise NotListed(f"{sym} is not listed on MEXC futures")
+        if c.get("apiAllowed") is False: raise NotListed(f"{sym} does not allow API trading on MEXC")
+        if int(c.get("state") or 0) != 0: raise NotListed(f"{sym} is not enabled on MEXC (state {c.get('state')})")
         return c
+    def ping(self):
+        return self.public("/api/v1/contract/ping") is not None
     def fair_price(self, sym):
         d = self.public(f"/api/v1/contract/fair_price/{sym}") or {}; return float(d.get("fairPrice") or 0) or None
     # ---- private ----
@@ -138,6 +151,9 @@ class Client:
     def cancel_ext(self, sym, ext):
         d = self.private("POST", "/api/v1/private/order/cancel_with_external", body=[{"symbol": sym, "externalOid": ext}]) or []
         return d[0] if isinstance(d, list) and d else d
+    def open_orders(self, sym, page_num=1, page_size=50):
+        """GET params (page_num/page_size) are part of the signed string: sorted by key, k=v joined with '&' (omitting them -> 602)."""
+        return self.private("GET", f"/api/v1/private/order/list/open_orders/{sym}", params={"page_num": page_num, "page_size": page_size}) or []
     def open_positions(self, sym=None):
         return self.private("GET", "/api/v1/private/position/open_positions", params={"symbol": sym}) or []
     def stop_orders(self, sym):
