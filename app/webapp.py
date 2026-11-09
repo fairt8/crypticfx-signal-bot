@@ -152,3 +152,26 @@ def compact_backtest(d):
 def app_backtest(request: Request):
     auth(request); b = latest_backtest()
     return dict(available=bool(b), report=b)
+
+
+# ---- MEXC auto-trade add-on (owner only; reads signals, never changes them) ----
+@router.get("/app/api/autotrade")
+def app_autotrade(request: Request):
+    auth(request)
+    from . import autotrade; return autotrade.view()
+@router.post("/app/api/autotrade")
+async def app_autotrade_set(request: Request):
+    auth(request)
+    from . import autotrade
+    try: body = await request.json()
+    except Exception: raise HTTPException(400, "bad JSON")
+    if not isinstance(body, dict): raise HTTPException(400, "bad JSON")
+    try: autotrade.save_settings(body)
+    except ValueError as e: raise HTTPException(400, str(e))
+    return autotrade.view()
+class FlatIn(BaseModel): confirm: str
+@router.post("/app/api/autotrade/flatten")
+def app_autotrade_flatten(request: Request, body: FlatIn):
+    auth(request)
+    if body.confirm != "FLATTEN": raise HTTPException(400, "confirm must be FLATTEN")
+    from . import autotrade; return dict(result=autotrade.flatten(), state=autotrade.view())

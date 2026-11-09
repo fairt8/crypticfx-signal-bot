@@ -15,6 +15,9 @@ def _start():
     from . import alerts; alerts.apply_migrations()   # one-time, user-approved alert-mode switch (stored in the DB)
     don20.start(scanner.crypto_universe, lambda: bool(scanner.STATE.get("leader")))
     if C.ENABLE_SCHEDULER: scanner.start()
+    try:   # MEXC auto-trade add-on: own thread, reads signals only; a failure here never stops the scanner/alerts above
+        from . import autotrade; autotrade.start(lambda: bool(scanner.STATE.get("leader")))
+    except Exception as e: print(f"[autotrade] not started: {e!r}", flush=True)
 @app.on_event("shutdown")
 def _stop(): db.release_lease()
 def desk_page(mode):

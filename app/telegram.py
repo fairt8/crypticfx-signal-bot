@@ -241,7 +241,29 @@ def on_callback(q):
         requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"], text="Alert mode: " + alerts.MODE_LABEL[m]), timeout=10)
         requests.post(API("editMessageText"), json=dict(chat_id=chat, message_id=q["message"]["message_id"], parse_mode="HTML",
                       text=_alerts_text(), reply_markup=_alerts_markup(m)), timeout=10)
+    elif data.startswith("at:"):   # auto-trade add-on panel (isolated: errors here never touch signals/alerts)
+        try:
+            from . import autotrade
+            toast, text, markup, extra = autotrade.tg_callback(data)
+            requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"], text=(toast or "")[:190]), timeout=10)
+            if text: requests.post(API("editMessageText"), json=dict({"chat_id": chat, "message_id": q["message"]["message_id"], "parse_mode": "HTML", "text": text[:4000]},
+                                   **({"reply_markup": markup} if markup else {})), timeout=10)
+            if extra: requests.post(API("sendMessage"), json=dict(chat_id=chat, parse_mode="HTML", text=extra[0], reply_markup=extra[1]), timeout=10)
+        except Exception as e:
+            try: requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"], text=f"Auto-trade error: {type(e).__name__}"[:190]), timeout=10)
+            except Exception: pass
     else: requests.post(API("answerCallbackQuery"), json=dict(callback_query_id=q["id"]), timeout=10)
+def send_autotrade_panel(text, chat_id=None):
+    """/autotrade and /flatten (auto-trade add-on). Own try/except: never affects signal posting."""
+    from . import autotrade
+    if text.split()[0].split("@")[0].lower() == "/flatten":
+        body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text="🛑 <b>Flatten all auto trades?</b> Turns auto-trade OFF, cancels pending auto limits and market-closes every auto position on MEXC. Manual positions are not touched.",
+                    reply_markup={"inline_keyboard": [[{"text": "🛑 Yes, flatten all", "callback_data": "at:flx"}, {"text": "Cancel", "callback_data": "at:no"}]]})
+        return requests.post(API("sendMessage"), json=body, timeout=20).ok
+    out, markup = autotrade.tg_command(text)
+    body = dict(chat_id=chat_id or C.TELEGRAM_CHAT_ID, parse_mode="HTML", text=out[:4000])
+    if markup: body["reply_markup"] = markup
+    return requests.post(API("sendMessage"), json=body, timeout=20).ok
 HTML_CMDS = ("/signals", "/primary", "/secondary", "/open", "/closed", "/pending", "/new", "/retired", "/don20", "/don28", "/strategies", "/pnl", "/trades", "/stats", "/help", "/start")
 def help_html():
     from . import strategies as SG, alerts
@@ -254,7 +276,8 @@ def help_html():
         "  /open – live trades with PnL\n  /closed [day|week|month|all] – results\n  /pending · /new [period]\n"
         "  /pnl SYMBOL · /trades SYMBOL – one token\n  /don20 · /don28 – DON20 ⭐ / DON28 🔷 total PnL\n  /stats – 30-day stats by tier\n\n"
         "🧭 <b>More</b>\n  /strategies – tiers + live verdicts\n  /retired – retired strategy history\n"
-        "  /explain ID – full signal card + AI note\n  /ask question – ask AI\n  📱 /app – the Mini App (also the ☰ button)")
+        "  /explain ID – full signal card + AI note\n  /ask question – ask AI\n  📱 /app – the Mini App (also the ☰ button)\n\n"
+        "🤖 <b>Auto-trade (MEXC)</b>\n  /autotrade – settings + strategy switches\n  /autotrade off – stop new auto orders\n  /flatten – close all auto trades (asks first)")
 HELP = "/signals – open/pending signals\n/primary · /secondary – one tier\n/alerts – alert mode\n/stats – 30-day stats\n/help – all commands"
 def cmd_stats():
     from . import strategies as SG
@@ -314,6 +337,7 @@ def process_update(u):
         try:
             cmd = m["text"].split()[0].split("@")[0].lower()
             if cmd == "/app": send_app_button(chat); return
+            if cmd in ("/autotrade", "/flatten"): send_autotrade_panel(m["text"], chat); return
             if cmd == "/alerts":
                 a = m["text"].split(maxsplit=1)
                 if len(a) > 1:
@@ -347,7 +371,7 @@ def set_menu_button():
     set_commands()
 COMMANDS = [("signals", "📡 Open + pending signals by tier"), ("primary", "⭐ PRIMARY signals"), ("secondary", "🔷 SECONDARY signals"),
             ("alerts", "🔔 Push ⭐ only or ⭐ + 🔷"), ("open", "📈 Live trades with PnL"), ("closed", "🏁 Closed results"), ("stats", "📊 30-day stats by tier"),
-            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
+            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("autotrade", "🤖 MEXC auto-trade settings"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
 def set_commands():
     """Owner chat's / command menu (setMyCommands, chat scope). Best effort."""
     try:

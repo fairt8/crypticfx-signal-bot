@@ -77,6 +77,7 @@ table{width:100%;border-collapse:collapse;font-size:12.5px}td,th{padding:7px 4px
  <h2>Live signals</h2><div class="tabs" id="stiers"></div><div class="sel">Days <select id="sdays"><option>1</option><option selected>7</option><option>30</option></select> Market <select id="smk"><option value="">all</option><option>crypto</option><option>forex</option></select> Status <select id="sst"><option value="">all</option><option>pending</option><option>open</option><option>tp</option><option>sl</option><option>be</option><option>expired</option><option>cancelled</option></select> Strategy <select id="ssg"><option value="">all</option></select></div><div id="slist" class="pcg"></div></section>
 <section class="sec" id="s-pnl"></section>
 <section class="sec" id="s-more"></section>
+<section class="sec" id="s-auto"></section>
 </main>
 <nav><div class="in" id="nav"></div></nav>
 <script>
@@ -118,11 +119,11 @@ let CID=0;function chart(pts,h,opt){opt=opt||{};if(!pts||pts.length<3)return`<di
  ${opt.axis?`<div class="pl" style="margin-top:4px"><span>${wat(pts[0][0],{hour:undefined,minute:undefined}).replace(' WAT','')}</span><span>now</span></div>`:''}</div>`}
 // ---- state ----
 let DESK=null,fetchedAt=0,cur='home',pseg='open',pfil='all',hst='closed',hper='week',stier='',tokOpen=false,SIGS=null,LST={};
-const NAV=[['home','Home','<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'],['pos','Positions','<path d="M4 20V10M9 20V4M14 20v-8M19 20v-5M2 20h20"/>'],['alerts','Alerts','<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>'],['pnl','PnL','<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'],['more','More','<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
+const NAV=[['home','Home','<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'],['pos','Positions','<path d="M4 20V10M9 20V4M14 20v-8M19 20v-5M2 20h20"/>'],['alerts','Alerts','<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/>'],['pnl','PnL','<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>'],['auto','Auto','<rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"/>'],['more','More','<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>']];
 $('nav').innerHTML=NAV.map(([k,n,p])=>`<button data-k="${k}" class="${k==cur?'on':''}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>${n}</button>`).join('');
 $('nav').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.k)};
 function show(k){if(k!==cur)H();cur=k;document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('on',s.id=='s-'+k));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.k==k));
- if(tg){k=='home'?tg.BackButton.hide():tg.BackButton.show()}render();if(k=='alerts'&&!SIGS)loadSigs();if(k=='pos'&&pseg=='history')loadHist();window.scrollTo({top:0,behavior:'smooth'})}
+ if(tg){k=='home'?tg.BackButton.hide():tg.BackButton.show()}render();if(k=='alerts'&&!SIGS)loadSigs();if(k=='pos'&&pseg=='history')loadHist();if(k=='auto')loadAuto();window.scrollTo({top:0,behavior:'smooth'})}
 if(tg)tg.BackButton.onClick(()=>{if(cur=='more'&&tokOpen){tokOpen=false;$('tok').innerHTML='';$('q').value='';return}show('home')});
 // ---- header ----
 function hdr(){const h=DESK&&DESK.health;const el=$('live');if(!h){el.className='live';el.lastChild.textContent='Connecting…';return}
@@ -226,13 +227,45 @@ async function lookup(){const q=$('q').value.trim();if(!q)return;tokOpen=true;$(
  try{const d=await J(EP.token(encodeURIComponent(q)));const s=d.summary;$('tok').innerHTML=`<div class="g2" style="margin-top:6px"><div class="card"><div class="k">${esc(s.symbol)} closed</div><div class="v">${sR(s.net_r)}</div><div class="muted">${usd(D(s.net_r))} · ${s.closed} closed · win ${s.win_rate??'–'}%</div></div><div class="card"><div class="k">Open live</div><div class="v">${sR(s.open_live_net_r)}</div><div class="muted">${usd(D(s.open_live_net_r))} · ${s.open} open · ${s.pending} pending</div></div></div>`+(d.trades.length?d.trades.map(sigCard).join(''):'<div class="empty">No trades for this token yet.</div>');H('success')}catch(e){$('tok').innerHTML=ERR(e)}}
 document.addEventListener('click',e=>{const w=e.target.closest('.sig');if(w&&w.querySelector('.why')&&!e.target.closest('#tok')){w.classList.toggle('x');return}
  const r=e.target.closest('[data-sym]');if(r&&!e.target.closest('#tok')&&!e.target.closest('button')){H();show('more');$('q').value=r.dataset.sym;lookup();setTimeout(()=>$('q').scrollIntoView({behavior:'smooth',block:'start'}),60)}});
-function render(){if(!DESK)return;hdr();try{({home:vHome,pos:vPos,alerts:vAlerts,pnl:vPnl,more:vMore})[cur]()}catch(e){console.error(e);$('s-'+cur).insertAdjacentHTML('afterbegin',ERR(e))}}
-async function load(force){const b=$('rfb');b.classList.add('spin');try{DESK=await J(EP.desk);fetchedAt=Date.now();DESK.listing.forEach(x=>LST[x.key]=x);render();if(force&&cur=='alerts'){SIGS=null;loadSigs()}if(force&&cur=='pos'&&pseg=='history')loadHist()}
+// ---- Auto-trade (MEXC add-on; owner-only API; signals are never changed by it) ----
+let AT=null;
+async function loadAuto(){if(!APP){$('s-auto').innerHTML=`<h2>🤖 Auto-trade · MEXC futures</h2><div class="card"><div class="k">Owner only</div><p class="muted" style="margin:6px 0 0">Auto-trade settings, positions and PnL are private. Open the Mini App from <b>@CrypticFxBot</b> (☰ menu or /app), or send /autotrade to the bot. Signals and alerts work the same whether auto-trade is on or off.</p></div>`;return}
+ if(!AT)$('s-auto').innerHTML='<div class="skel" style="height:220px"></div>';try{AT=await J('/app/api/autotrade');rAuto()}catch(e){$('s-auto').innerHTML=ERR(e)}}
+async function atSet(p){H();try{AT=await J('/app/api/autotrade',{method:'POST',body:JSON.stringify(p)});H('success');rAuto()}catch(e){H('error');alert('Not saved: '+e.message)}}
+function cfm(m,fn){if(tg&&tg.showConfirm)tg.showConfirm(m,ok=>{if(ok)fn()});else if(confirm(m))fn()}
+const uS=v=>v==null?'–':`<span class="${cls(v)}">${v>0?'+':v<0?MINUS:''}${Math.abs(v).toFixed(2)} USDT</span>`;
+function atRow(r){const st=r.status=='filled'?'open':r.status=='open_order'?'pending limit':r.status;const lv=r.upnl_usdt!=null?uS(r.upnl_usdt):r.pnl_usdt!=null&&r.status=='closed'?uS(r.pnl_usdt):'<span class="muted">–</span>';
+ const why=r.skip||r.error||r.exit_reason||'';return `<div class="sl"><div style="min-width:0">${dirB(r.direction)} <b>${esc(r.symbol)}</b> <span class="muted">${esc(shortOf(r.strategy))} #${r.ref_id}</span> ${stB(st)}${r.dry?' <span class="pill">🧪 dry</span>':''}
+ <div class="muted">${r.entry!=null?'entry '+px(r.fill_price||r.entry):''}${r.sl!=null?' · SL '+px(r.sl):''}${r.tp!=null?' · TP '+px(r.tp):r.vol?' · trail':''}${r.vol?' · '+(+r.vol)+' ct':''}${r.risk_usdt?' · risk '+(+r.risk_usdt).toFixed(2):''}${why?' · '+esc(why):''}</div><div class="muted">${wat(r.closed_at||r.filled_at||r.created_at)}</div></div><div style="text-align:right;flex:none">${lv}</div></div>`}
+function rAuto(){const a=AT,s=a.settings,b=s.dry_run?a.dry:a.live,O=(x,y)=>x==y?'on':'';
+ const on=s.enabled,mode=s.dry_run?'🧪 Dry-run · no real orders':'💸 LIVE · real MEXC orders';
+ let h=`<h2>🤖 Auto-trade · MEXC futures</h2><div class="card hero"><div class="k">Status</div><div class="v big ${on?'pos':''}">${on?'ON':'OFF'}</div><div class="muted">${mode} · API key ${a.key_present?'set ✅':'not set'}</div>
+ <div class="mode"><button class="${on?'':'on'}" onclick="atSet({enabled:${!on}})">${on?'🔴 Turn OFF':'🟢 Turn ON'}</button><button onclick="${s.dry_run?`cfm('Go LIVE? Auto-trade will place REAL MEXC futures orders with your key.',()=>atSet({dry_run:false}))`:'atSet({dry_run:true})'}">${s.dry_run?'💸 Go LIVE…':'🧪 Back to dry-run'}</button></div>
+ <div class="tiles" style="margin-top:12px"><div class="tile"><span>Open</span><b>${b.open}</b></div><div class="tile"><span>Pending</span><b>${b.pending}</b></div><div class="tile"><span>Today</span><b>${uS(b.today_usdt)}</b></div><div class="tile"><span>All closed</span><b>${uS(b.pnl_usdt)}</b></div><div class="tile"><span>Win</span><b>${b.win_rate==null?'–':b.win_rate+'%'}</b></div><div class="tile"><span>Open PnL</span><b>${uS(b.upnl_usdt)}</b></div></div>
+ <p class="muted" style="margin:10px 0 0">Signals and Telegram alerts are never paused or changed by auto-trade, so you can still take them by hand on Binance or Bybit.</p></div>
+ <h2>Strategies to auto-trade</h2><div class="card"><div class="pills">${a.strategies.map(x=>`<button class="chip ${x.on?'on':''}" data-at="${esc(x.key)}">${x.on?'✅':'⬜'} ${esc(x.short)} ${x.tier=='primary'?'⭐':'🔷'}</button>`).join('')}</div><p class="muted" style="margin:8px 0 0">Crypto strategies only. A strategy only trades signals that come after you switch it on.</p></div>
+ <h2>Settings</h2><div class="card"><div class="set"><div><label>Risk per trade (USDT)</label><input id="atr" type="number" min="0.1" step="any" value="${s.risk_usdt}"></div><div><label>Max open auto trades</label><input id="atm" type="number" min="1" max="50" step="1" value="${s.max_open}"></div>
+ <div><label>Leverage cap (x)</label><input id="atl" type="number" min="1" max="125" step="1" value="${s.leverage}"></div><div><label>Max notional / trade (USDT, 0 = off)</label><input id="atn" type="number" min="0" step="any" value="${s.max_notional_usdt}"></div>
+ <div><label>Daily loss limit (USDT, 0 = off)</label><input id="atd" type="number" min="0" step="any" value="${s.daily_loss_usdt}"></div></div>
+ <label style="font-size:12px;color:var(--hint);display:block;margin-top:12px">Order type</label><div class="mode" style="margin-top:4px"><button class="${O(s.order_type,'limit')}" onclick="atSet({order_type:'limit'})">Limit at entry</button><button class="${O(s.order_type,'market')}" onclick="atSet({order_type:'market'})">Market</button></div>
+ ${s.order_type=='limit'?`<label style="font-size:12px;color:var(--hint);display:block;margin-top:12px">Cancel the limit if not filled within</label><div class="tabs" style="margin-top:4px">${a.timeouts.filter(t=>t).concat([0]).map(t=>`<button class="chip ${O(s.limit_timeout_min,t)}" onclick="atSet({limit_timeout_min:${t}})">${t?t+' min':'No timeout'}</button>`).join('')}</div>`:''}
+ <div style="display:flex;gap:8px;margin-top:12px;align-items:center"><button class="btn" id="atsv">Save numbers</button><span class="muted">Size = risk ÷ stop distance</span></div></div>
+ <h2>Open positions &amp; pending limits · ${a.active.length}</h2><div class="card" style="padding:4px 14px">${a.active.map(atRow).join('')||'<div class="empty">No open auto trades.</div>'}</div>
+ <h2>Recent</h2><div class="card" style="padding:4px 14px">${a.recent.slice(0,30).map(atRow).join('')||'<div class="empty">Nothing yet.</div>'}</div>
+ <h2>Safety</h2><div class="card"><button class="btn" style="background:var(--r);color:#fff" onclick="cfm('Flatten ALL auto trades? This turns auto-trade OFF, cancels pending auto limits and market-closes every auto position on MEXC. Manual positions are not touched.',atFlat)">🛑 Flatten all auto trades</button>
+ <div class="dl"><div><span>Exchange</span><b>${esc(a.exchange.name)}</b></div><div><span>Worker last run</span><b>${a.worker.last_tick?wat(a.worker.last_tick):'idle'}</b></div><div><span>Recent errors</span><b class="${a.worker.errors.length?'neg':''}">${a.worker.errors.length}</b></div></div>
+ ${a.worker.errors.length?`<div class="muted">${a.worker.errors.slice(-3).map(e=>esc(e.msg)).join('<br>')}</div>`:''}</div>`;
+ $('s-auto').innerHTML=h;
+ $('s-auto').querySelectorAll('[data-at]').forEach(el=>el.onclick=()=>{const k=el.dataset.at,c=AT.settings.strategies;atSet({strategies:c.includes(k)?c.filter(x=>x!=k):c.concat([k])})});
+ $('atsv').onclick=()=>atSet({risk_usdt:+$('atr').value,max_open:+$('atm').value,leverage:+$('atl').value,max_notional_usdt:+$('atn').value,daily_loss_usdt:+$('atd').value})}
+async function atFlat(){H();try{const d=await J('/app/api/autotrade/flatten',{method:'POST',body:JSON.stringify({confirm:'FLATTEN'})});AT=d.state;H('success');rAuto();alert(`Flattened: ${d.result.closed} closed, ${d.result.cancelled} limits cancelled. Auto-trade is OFF.`)}catch(e){H('error');alert('Flatten failed: '+e.message)}}
+function render(){if(!DESK)return;hdr();try{({home:vHome,pos:vPos,alerts:vAlerts,pnl:vPnl,more:vMore,auto:()=>{}})[cur]()}catch(e){console.error(e);$('s-'+cur).insertAdjacentHTML('afterbegin',ERR(e))}}
+async function load(force){const b=$('rfb');b.classList.add('spin');try{DESK=await J(EP.desk);fetchedAt=Date.now();DESK.listing.forEach(x=>LST[x.key]=x);render();if(force&&cur=='alerts'){SIGS=null;loadSigs()}if(force&&cur=='pos'&&pseg=='history')loadHist();if(force&&cur=='auto')loadAuto()}
  catch(e){if(!DESK){$('s-home').innerHTML=ERR(e);$('live').className='live bad';$('live').lastChild.textContent=APP?'Not authorised':'Offline'}else hdr()}finally{b.classList.remove('spin')}}
 $('rfb').onclick=()=>{H();load(true)};$('thb').onclick=()=>{S.theme=S.theme=='auto'?(matchMedia('(prefers-color-scheme: light)').matches&&!APP?'dark':'light'):S.theme=='light'?'dark':'auto';saveS();applyTheme();H()};
 let y0=null,pull=0;addEventListener('touchstart',e=>{y0=scrollY<=0?e.touches[0].clientY:null},{passive:true});
 addEventListener('touchmove',e=>{if(y0==null)return;pull=Math.max(0,e.touches[0].clientY-y0);$('ptr').style.height=Math.min(pull/2,40)+'px';$('ptr').textContent=pull>110?'↻ release to refresh':'↓ pull to refresh'},{passive:true});
 addEventListener('touchend',()=>{if(pull>110){H();load(true)}pull=0;y0=null;$('ptr').style.height='0'});
-setInterval(()=>{if(!document.hidden&&!(cur=='more'&&document.activeElement&&document.activeElement.tagName=='INPUT'))load()},60000);
+setInterval(()=>{if(!document.hidden&&!((cur=='more'||cur=='auto')&&document.activeElement&&document.activeElement.tagName=='INPUT'))load()},60000);
 load();
 </script></body></html>
