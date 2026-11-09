@@ -1,4 +1,5 @@
-"""MEXC futures auto-trade add-on (user 2026-11-09), with Bybit as the BACKUP exchange (user 2026-11-09, t140u). READ-ONLY consumer of the signals the bot already generates.
+"""MEXC futures auto-trade add-on (user 2026-11-09), with WEEX as the FALLBACK exchange (user 2026-11-09; WEEX replaced Bybit,
+which was removed). READ-ONLY consumer of the signals the bot already generates.
 
 Isolation (hard requirement): nothing in the scanner, outcome tracker, DON20/DON28 run, Telegram signal posts, dashboard or
 Mini App signal lists calls into this module. It runs in its own daemon thread ("autotrade"), every step wrapped in
@@ -14,7 +15,7 @@ Flow (every AUTOTRADE_POLL_S, default 60 s, leader instance only):
   cancelled at the timeout or when the signal invalidates first.
 Dry-run (default) logs/simulates the same orders without calling any private exchange endpoint.
 
-Exchanges (app/exchanges.py): primary (default MEXC) and, with failover on (default: on once Bybit keys exist), the other
+Exchanges (app/exchanges.py): primary (default MEXC) and, with failover on (default: on once WEEX keys exist), the other
 one as backup. A NEW order goes to the backup only when the primary can't take it with nothing executed there: failed
 health check, unreachable / 5xx / maintenance before or on placement (confirmed by a client-order-id lookup when the
 primary answers), or the symbol is not tradable on the primary. If the primary's state is UNKNOWN (timeout after the
@@ -23,7 +24,7 @@ Every trade is managed on the exchange it was opened on; if that exchange is dow
 (the exchange-side SL/TP still protect the position) and Telegram says so."""
 import collections, json, os, secrets, threading, time
 from datetime import datetime, timezone, timedelta
-from . import db, mexc as M, bybit as B, exchanges as X
+from . import db, mexc as M, weex as W, exchanges as X
 
 STRATS = ["DON20", "DON28", "BRK", "PAT-WEDGE", "CHK", "FVG-D1", "FVG-PLAN", "PAT-TRIPLE-C", "FVG+TREND"]   # crypto only; forex excluded
 DON = ("DON20", "DON28")
@@ -38,12 +39,14 @@ MAX_PX_DEV = float(os.getenv("AUTOTRADE_MAX_PX_DEV", "0.02"))   # MEXC vs Binanc
 FEE = float(os.getenv("AUTOTRADE_FEE", "0.0005"))               # MEXC API futures taker fee per side (announcement 2026-03-30)
 DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="limit",
                 limit_timeout_min=15, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
-                primary_exchange="mexc", failover=None, ex_on={"mexc": True, "bybit": True}, lev_mode="cap", size_line=True)
+                primary_exchange="mexc", failover=None, ex_on={"mexc": True, "weex": True}, lev_mode="cap", size_line=True)
 ORDER_TYPES = ("limit", "market", "limit_market")   # limit_market: limit at entry; at the timeout -> market if still <= 0.5R away and valid
-OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}   # failover None = on when Bybit keys exist
+OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}   # failover None = on when WEEX keys exist
 STATE = dict(last_tick=None, last_result=None, errors=collections.deque(maxlen=30), skips=collections.deque(maxlen=30), backoff_until=0, idle_until=0, perm={})
 PERM_NOTE = {"mexc": ("MEXC key can't read the account balance (code 700007). In MEXC ▸ API Management edit this key and also tick "
-                      "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short.")}
+                      "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short."),
+             "weex": ("WEEX key can't read the futures balance (permission denied). In WEEX ▸ API Management give this key the Futures/Contract "
+                      "Read + Trade permission. Until then the margin pre-check is skipped and WEEX itself rejects an order if margin is short.")}
 _S = {"t": 0, "v": None}; _LOCK = threading.RLock(); _TBL = {"ok": False}; _ERRSENT = {}
 
 def utcnow(): return datetime.now(timezone.utc)
@@ -73,7 +76,7 @@ def ensure_table():
         if db.PG: c.execute("ALTER TABLE autotrade ADD COLUMN IF NOT EXISTS exchange TEXT")
         elif "exchange" not in {r[1] for r in c.execute("PRAGMA table_info(autotrade)").fetchall()}: c.execute("ALTER TABLE autotrade ADD COLUMN exchange TEXT")
     _TBL["ok"] = True
-def exof(r): return (r.get("exchange") if isinstance(r, dict) else None) or "mexc"   # rows from before the Bybit backup are MEXC
+def exof(r): return (r.get("exchange") if isinstance(r, dict) else None) or "mexc"   # rows from before the exchange column are MEXC
 def _q(sql, p=()):
     with db.conn() as c: return [dict(r) for r in c.execute(sql, p).fetchall()]
 def _upd(i, **kw):
@@ -95,8 +98,17 @@ def settings(max_age=300):
         except Exception as e:
             if _S["v"] is not None: return dict(_S["v"])
             raise
-        v = dict(DEFAULTS, **(json.loads(raw) if raw else {}))
+        v = migrate(dict(DEFAULTS, **(json.loads(raw) if raw else {})))
         _S.update(t=time.time(), v=v); return dict(v)
+def migrate(v):
+    """Bybit was removed (user 2026-11-09): settings that mention it are mapped to WEEX. Never touches enabled / dry_run."""
+    v = dict(v)
+    if v.get("primary_exchange") not in X.NAMES: v["primary_exchange"] = "weex" if v.get("primary_exchange") == "bybit" else "mexc"
+    on = dict(v.get("ex_on") or {})
+    if "bybit" in on: on.setdefault("weex", bool(on["bybit"]))
+    v["ex_on"] = dict(DEFAULTS["ex_on"], **{k: bool(x) for k, x in on.items() if k in X.NAMES})
+    if not any(v["ex_on"].values()): v["ex_on"] = dict(DEFAULTS["ex_on"])
+    return v
 def _num(x, lo, hi, name, kind=float):
     try: v = kind(x)
     except Exception: raise ValueError(f"{name} must be a number")
@@ -112,15 +124,15 @@ def validate(patch, cur):
         elif k == "dry_run":
             v = bool(v)
             if not v and not any(X.key_present(x) for x in X.NAMES if (s.get("ex_on") or {}).get(x, True)):
-                raise ValueError("Live mode needs an exchange key in the server env file (MEXC_API_KEY/MEXC_API_SECRET or BYBIT_API_KEY/BYBIT_API_SECRET). Dry-run stays on.")
+                raise ValueError("Live mode needs an exchange key in the server env file (MEXC_API_KEY/MEXC_API_SECRET or WEEX_API_KEY/WEEX_API_SECRET/WEEX_API_PASSPHRASE). Dry-run stays on.")
             s["dry_run"] = v
         elif k == "primary_exchange":
-            if v not in X.NAMES: raise ValueError("primary exchange must be mexc or bybit")
+            if v not in X.NAMES: raise ValueError("primary exchange must be mexc or weex")
             s[k] = v
         elif k == "failover":
             s[k] = None if v is None else bool(v)
         elif k == "ex_on":
-            if not isinstance(v, dict) or any(x not in X.NAMES for x in v): raise ValueError("ex_on must map mexc/bybit to on/off")
+            if not isinstance(v, dict) or any(x not in X.NAMES for x in v): raise ValueError("ex_on must map mexc/weex to on/off")
             on = dict(DEFAULTS["ex_on"], **(s.get("ex_on") or {})); on.update({x: bool(y) for x, y in v.items()})
             if not any(on.values()): raise ValueError("keep at least one exchange enabled")
             s[k] = on
@@ -167,11 +179,11 @@ def client():
 def adapters(cl=None):
     """{name: adapter}. cl: None (real clients), a MEXC-style client (tests), or a dict {name: client or adapter}."""
     if cl is None:
-        if _CL["ads"] is None: _CL["ads"] = {"mexc": X.Mexc(client()), "bybit": X.Bybit(B.Client())}
+        if _CL["ads"] is None: _CL["ads"] = {"mexc": X.Mexc(client()), "weex": X.Weex(W.Client())}
         return _CL["ads"]
     if isinstance(cl, dict): return {k: X.wrap(k, v) for k, v in cl.items()}
     return {"mexc": X.wrap("mexc", cl)}
-def failover_on(s): return bool(s["failover"]) if s.get("failover") is not None else B.key_present()
+def failover_on(s): return bool(s["failover"]) if s.get("failover") is not None else W.key_present()
 def ex_on(s, name): return bool(dict(DEFAULTS["ex_on"], **(s.get("ex_on") or {})).get(name, True))
 def route(s, ads):
     """Exchanges to try for a NEW order, in order: primary, then the backup when failover is on."""
@@ -408,9 +420,9 @@ def _to_market(ctx, r, p, s, to):
     try:
         oid = ad.place_open(con, r["direction"], z["vol"], e, True, z["leverage"], r["sl"], r["tp"], ext)
         _upd(r["id"], status="open_order", order_id=oid); ctx.msg(r, head)
-    except (M.RateLimited, B.RateLimited): raise
+    except (M.RateLimited, W.RateLimited): raise
     except Exception as x:
-        if X.kind(x) is None and isinstance(x, (M.MexcError, B.BybitError)):
+        if X.kind(x) is None and isinstance(x, (M.MexcError, W.WeexError)):
             _upd(r["id"], status="error", closed_at=iso(now), note=json.dumps(dict(error=f"market entry rejected {x.code}: {x.msg}"[:200])))
             ctx.msg(r, _hdr(r, "⚠️", "market entry rejected") + f"\n<code>{x.code}</code> {str(x.msg)[:150]}")
         else:   # unknown: stays 'placing', resolved by client order id (or error after 5 min)
@@ -448,7 +460,7 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     if not con: raise M.Skip("not a USDT pair")
     try: c = ad.instrument(con)
     except M.NotListed as e: raise X.Unavailable(str(e), row_id=rid)
-    except (M.Skip, M.RateLimited, B.RateLimited): raise
+    except (M.Skip, M.RateLimited, W.RateLimited): raise
     except Exception as e:
         if X.kind(e): raise down(e, "unreachable")
         raise
@@ -466,9 +478,9 @@ def _open_on(ctx, s, cnd, ad, rid, why):
             if fp and abs(fp - p) / p > MAX_PX_DEV: raise M.Skip(f"{ad.label} price {fp:g} differs from Binance {p:g} by {abs(fp-p)/p*100:.1f}% (different contract)")
             if ctx.position(ex, con, "long") or ctx.position(ex, con, "short"): raise M.Skip(f"there is already a {ad.label} position on {con} (manual?)")
             try: av = ad.usdt_available(); STATE["perm"].pop(ex, None)
-            except M.NoPermission: av = None; _perm(ctx, ex, s)
+            except (M.NoPermission, W.NoPermission): av = None; _perm(ctx, ex, s)
             if av is not None and av < z["margin"] * 1.05: raise M.Skip(f"not enough USDT margin on {ad.label} ({av:.2f} available, {z['margin']:.2f} needed)")
-        except (M.Skip, M.RateLimited, B.RateLimited): raise
+        except (M.Skip, M.RateLimited, W.RateLimited): raise
         except Exception as e:
             if X.kind(e): raise down(e, "unreachable before the order")
             raise
@@ -500,10 +512,10 @@ def _open_on(ctx, s, cnd, ad, rid, why):
         print(f"[autotrade] LIVE {ex} {row['order_type']} {row['direction']} {con} vol={z['vol']:g} @ {row['entry']} ({cnd['strategy']} #{cnd['ref_id']}) order {oid}", flush=True)
         if why: ctx.msg(full, _hdr(full, "↪️", f"order placed{via}") + fo_line)
         return i
-    except (M.RateLimited, B.RateLimited): raise   # stays 'placing'; resolved by client order id next tick
+    except (M.RateLimited, W.RateLimited): raise   # stays 'placing'; resolved by client order id next tick
     except Exception as e:
         k = X.kind(e)
-        if k is None and isinstance(e, (M.MexcError, B.BybitError)):   # a definitive business rejection: no failover
+        if k is None and isinstance(e, (M.MexcError, W.WeexError)):   # a definitive business rejection: no failover
             _upd(i, status="error", note=json.dumps(dict(timeout=to, error=f"{ad.label} {e.code}: {e.msg}"[:200])))
             ctx.msg(full, _hdr(full, "⚠️", "order rejected") + f"\n<code>{e.code}</code> {str(e.msg)[:150]}"); return i
         try: o = ad.order(con, ext); known = True             # did it reach the exchange? (idempotent client order id)
@@ -542,7 +554,7 @@ def tick(cl=None, px_fn=None, now=None):
     for r in active:
         src = sigs.get(int(r["ref_id"])) if r["source"] == "sig" else dons.get((r["source"], int(r["ref_id"])))
         try: manage(ctx, r, src, s)
-        except (M.RateLimited, B.RateLimited) as e: _err("rate limit", e); STATE["backoff_until"] = time.time() + 120; break
+        except (M.RateLimited, W.RateLimited) as e: _err("rate limit", e); STATE["backoff_until"] = time.time() + 120; break
         except Exception as e:
             res["errors"] += 1; ex = exof(r); lb = X.LABEL.get(ex, ex); m = _err(f"manage #{r['id']} {r['symbol']} on {lb}", e)
             if X.kind(e):   # the opening exchange is down: keep retrying its exits/updates; its own SL/TP orders still protect it
@@ -574,7 +586,7 @@ def tick(cl=None, px_fn=None, now=None):
                 try: _insert(source=cnd["source"], ref_id=cnd["ref_id"], strategy=cnd["strategy"], symbol=cnd["symbol"], direction=cnd["direction"],
                              entry=cnd["entry"], sl=cnd["sl"], tp=cnd["tp"], status="skipped", dry=1 if s["dry_run"] else 0, note=json.dumps(dict(skip=str(e)[:200])))
                 except Exception as x: _err("record skip", x)
-            except (M.RateLimited, B.RateLimited) as e: _err("rate limit", e); STATE["backoff_until"] = time.time() + 120; break
+            except (M.RateLimited, W.RateLimited) as e: _err("rate limit", e); STATE["backoff_until"] = time.time() + 120; break
             except Exception as e: res["errors"] += 1; _err(f"open {cnd['symbol']}", e)
     notify(ctx.msgs, s)
     STATE.update(last_tick=iso(now), last_result=res); return res
@@ -653,7 +665,7 @@ def view():
                 timeouts=list(TIMEOUTS), active=act, recent=[r for r in rows if r["status"] not in ACTIVE][:60], live=summ(False), dry=summ(True),
                 worker=dict(last_tick=STATE["last_tick"], last_result=STATE["last_result"], poll_s=POLL_S, errors=list(STATE["errors"])[-8:], skips=list(STATE["skips"])[-10:]),
                 exchange=dict(name=" → ".join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or "none", base=M.BASE,
-                              order_api="MEXC USDT-M perpetual (primary by default) · Bybit V5 USDT linear perpetual (backup)"))
+                              order_api="MEXC USDT-M perpetual (primary by default) · WEEX V3 USDT-M perpetual (fallback)"))
 
 def panel_text():
     from .telegram import esc
@@ -667,9 +679,10 @@ def panel_text():
     lv = "MAX per coin (liq. kept beyond the stop)" if s.get("lev_mode") == "max" else f"≤ {s['leverage']}x"
     pri = s.get("primary_exchange") or "mexc"; bk = [x for x in X.NAMES if x != pri][0]
     def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · disabled")
-    L = ["🤖 <b>Auto-trade · MEXC futures + Bybit backup</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
-         f"🏦 Primary <b>{X.LABEL[pri]}</b> · backup <b>{X.LABEL[bk]}</b>: failover {'ON' if failover_on(s) else 'OFF'}" + ("" if s.get("failover") is not None else " (auto)"),
-         f"🔑 {kl('mexc')} · {kl('bybit')}",
+    L = ["🤖 <b>Auto-trade · MEXC futures + WEEX fallback</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
+         f"🏦 Primary <b>{X.LABEL[pri]}</b> · fallback <b>{X.LABEL[bk]}</b>: failover {'ON' if failover_on(s) else 'OFF'}" + ("" if s.get("failover") is not None else " (auto)"),
+         f"🔑 {kl('mexc')} · {kl('weex')}",
+         f"↪️ Route: <b>{esc(' → '.join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or 'none')}</b>" + ("" if X.key_present("weex") else " <i>(WEEX skipped live until its key is set)</i>"),
          f"💵 Risk <b>{s['risk_usdt']:g} USDT</b>/trade · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
          f"🧾 Order: {esc(ot)}",
          f"🧱 Max position size: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} <i>(caps qty × price per trade)</i> · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
@@ -712,7 +725,7 @@ def tg_command(text):
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
             else: return ("Usage: /autotrade [on|off|limit|market|limit_market|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
-                          "primary mexc|bybit|failover on|off|auto|mexc on|off|bybit on|off]"), None
+                          "primary mexc|weex|failover on|off|auto|mexc on|off|weex on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
 def tg_callback(data):

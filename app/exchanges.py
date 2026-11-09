@@ -1,7 +1,7 @@
-"""Exchange adapters for the auto-trade add-on: MEXC (primary by default) and Bybit (backup) behind one interface.
+"""Exchange adapters for the auto-trade add-on: MEXC (primary by default) and WEEX (fallback) behind one interface.
 
 All quantities are in the exchange's own order units (`vol`): MEXC = contracts (contractSize base units each),
-Bybit = base-coin qty (contractSize 1). instrument() returns a dict that mexc.size / round_price / floor_vol understand
+WEEX = base-coin qty (contractSize 1). instrument() returns a dict that mexc.size / round_price / floor_vol understand
 (contractSize, priceUnit, priceScale, volUnit, volScale, minVol, maxVol, maxLeverage, minNotional).
 Normalised shapes:
   position: dict(symbol, direction 'long'|'short', size, pid, avg, open_type, idx)
@@ -11,10 +11,10 @@ region block: nothing executed), 'unknown' (timeout or drop after the request ma
 import time
 from decimal import Decimal
 import requests
-from . import mexc as M, bybit as B
+from . import mexc as M, weex as W
 
-NAMES = ("mexc", "bybit")
-LABEL = {"mexc": "MEXC", "bybit": "Bybit"}
+NAMES = ("mexc", "weex")            # route order: primary first, then the fallback
+LABEL = {"mexc": "MEXC", "weex": "WEEX"}
 
 class Unavailable(Exception):
     """This exchange can't take the order right now (down / unreachable / symbol not listed). Nothing was executed on it,
@@ -23,17 +23,17 @@ class Unavailable(Exception):
 
 _NOT_SENT = ("NewConnectionError", "NameResolutionError", "Failed to establish a new connection", "Connection refused", "getaddrinfo", "Name or service not known")
 def kind(e):
-    if isinstance(e, (M.RateLimited, B.RateLimited)): return None
+    if isinstance(e, (M.RateLimited, W.RateLimited)): return None
     if isinstance(e, requests.exceptions.ConnectTimeout): return "not_sent"
     if isinstance(e, requests.exceptions.ConnectionError) and any(x in str(e) for x in _NOT_SENT): return "not_sent"
     if isinstance(e, (requests.exceptions.RequestException, ConnectionError, TimeoutError)): return "unknown"
     if isinstance(e, M.MexcError):
         return "server" if (e.http and int(e.http) >= 500) or e.code in M.SERVER_CODES else None
-    if isinstance(e, B.BybitError):
-        return "server" if (e.http and int(e.http) >= 500) or e.code in B.SERVER_CODES or e.code in (403, 10009) else None
+    if isinstance(e, W.WeexError):
+        return "server" if (e.http and int(e.http) >= 500) or e.code in W.SERVER_CODES or e.code == 403 else None
     return None
 def short(e): return f"{type(e).__name__}: {str(e)[:120]}"
-def key_present(name): return M.key_present() if name == "mexc" else B.key_present()
+def key_present(name): return M.key_present() if name == "mexc" else W.key_present() if name == "weex" else False
 
 class Base:
     name = label = ""
@@ -115,71 +115,84 @@ def _decimals(x):
     e = Decimal(str(x)).normalize().as_tuple().exponent
     return max(0, -int(e))
 
-class Bybit(Base):
-    name, label = "bybit", "Bybit"
+class Weex(Base):
+    """WEEX V3 USDT-M perpetuals. vol = base-coin quantity (step contractVal), positionSide LONG/SHORT on every order
+    (works in combined and separated position mode), account-default margin mode, leverage set per symbol,
+    SL/TP attached to the opening order (slTriggerPrice / tpTriggerPrice), amended via the TP/SL conditional orders."""
+    name, label = "weex", "WEEX"
     def symbol_of(self, s):
         s = str(s).upper(); return s if s.endswith("USDT") else None
-    def client_id(self, salt, tag, ref): return f"cfx{salt or '0'}b{tag}{ref}"[:36]
+    def client_id(self, salt, tag, ref): return f"cfx{salt or '0'}w{tag}{ref}"[:36]
     def instrument(self, sym):
         x = (self.cl.instruments() or {}).get(sym)
-        if not x: raise M.NotListed(f"{sym} is not listed on Bybit USDT perpetuals")
-        if x.get("status") != "Trading": raise M.NotListed(f"{sym} is not trading on Bybit (status {x.get('status')})")
-        pf, lf, lv = x.get("priceFilter") or {}, x.get("lotSizeFilter") or {}, x.get("leverageFilter") or {}
-        step = lf.get("qtyStep") or "1"; tick = pf.get("tickSize") or "0.0001"
-        return dict(symbol=sym, _ex="Bybit", contractSize=1, priceUnit=float(tick), priceScale=int(x.get("priceScale") or _decimals(tick)),
-                    volUnit=float(step), volScale=_decimals(step), minVol=float(lf.get("minOrderQty") or 0),
-                    maxVol=float(lf.get("maxMktOrderQty") or lf.get("maxOrderQty") or 0), maxLeverage=float(lv.get("maxLeverage") or 1),
-                    minNotional=float(lf.get("minNotionalValue") or 0))
+        if not x: raise M.NotListed(f"{sym} is not listed on WEEX USDT perpetuals")
+        api = self.cl.api_symbols() if hasattr(self.cl, "api_symbols") else None
+        if api is not None and sym not in api: raise M.NotListed(f"{sym} is not API-tradable on WEEX")
+        step = Decimal(str(x.get("contractVal") or 0)) or Decimal(1).scaleb(-max(0, int(x.get("quantityPrecision") or 0)))
+        pp = int(x.get("pricePrecision") if x.get("pricePrecision") is not None else 4)
+        mx = [float(v) for v in (x.get("maxOrderSize"), x.get("marketOpenLimitSize")) if v not in (None, "", 0, "0")]
+        return dict(symbol=sym, _ex="WEEX", contractSize=1, priceUnit=float(Decimal(1).scaleb(-pp)), priceScale=pp,
+                    volUnit=float(step), volScale=_decimals(step), minVol=float(x.get("minOrderSize") or step),
+                    maxVol=min(mx) if mx else 0.0, maxLeverage=float(x.get("maxLeverage") or 1), minNotional=0.0)
     def tier(self, sym, c, vol, notional):
-        """Bybit risk-limit tier for this position value (riskLimitValue >= notional), else the instrument max."""
+        """WEEX notional bracket for this position value (notionalCap >= notional), else the instrument max."""
         rl = getattr(self.cl, "risk_limits", None); tiers = []
         try: tiers = rl(sym) if rl else []
         except Exception: tiers = []
+        def t2(t): return dict(max_lev=max(1, int(float(t.get("initialLeverage") or 1))), mmr=float(t.get("maintMarginRatio") or DEFAULT_MMR))
         for t in tiers:
-            if float(t.get("riskLimitValue") or 0) >= float(notional):
-                return dict(max_lev=max(1, int(float(t.get("maxLeverage") or 1))), mmr=float(t.get("maintenanceMargin") or DEFAULT_MMR))
-        if tiers: t = tiers[-1]; return dict(max_lev=max(1, int(float(t.get("maxLeverage") or 1))), mmr=float(t.get("maintenanceMargin") or DEFAULT_MMR))
+            if float(t.get("notionalCap") or 0) >= float(notional): return t2(t)
+        if tiers: return t2(tiers[-1])
         return dict(max_lev=max(1, int(float(c.get("maxLeverage") or 1))), mmr=DEFAULT_MMR)
     def fair_price(self, sym): return self.cl.mark_price(sym)
     def usdt_available(self): return self.cl.usdt_available()
     def positions(self):
         out = []
         for p in self.cl.positions() or []:
-            sd = p.get("side")
-            if sd not in ("Buy", "Sell") or float(p.get("size") or 0) <= 0: continue
-            idx = int(p.get("positionIdx") or 0)
-            out.append(dict(symbol=p.get("symbol"), direction="long" if sd == "Buy" else "short", size=float(p["size"]), pid=f"{p.get('symbol')}:{idx}",
-                            avg=float(p.get("avgPrice") or 0) or None, open_type=int(p.get("tradeMode") or 0), idx=idx))
+            sd = str(p.get("side") or "").upper(); sz = float(p.get("size") or 0)
+            if sd not in ("LONG", "SHORT") or sz <= 0: continue
+            ov = float(p.get("openValue") or 0)
+            out.append(dict(symbol=p.get("symbol"), direction="long" if sd == "LONG" else "short", size=sz, pid=str(p.get("id") or f"{p.get('symbol')}:{sd}"),
+                            avg=(ov / sz) if ov and sz else None, open_type=p.get("marginType"), idx=sd))
         return out
-    def _idx(self, direction):
-        hedge = self.cl._idx.get("hedge") if hasattr(self.cl, "_idx") else False
-        return (1 if direction == "long" else 2) if hedge else 0
     def place_open(self, sym, direction, vol, price, market, leverage, sl, tp, cid):
-        self.cl.set_leverage(sym, leverage)
-        def body():
-            b = dict(symbol=sym, side="Buy" if direction == "long" else "Sell", orderType="Market" if market else "Limit", qty=B.dstr(vol),
-                     timeInForce="IOC" if market else "GTC", positionIdx=self._idx(direction), orderLinkId=cid[:36], reduceOnly=False)
-            if not market: b["price"] = B.dstr(price)
-            if sl or tp: b.update(tpslMode="Full", stopLoss=B.dstr(sl) if sl else None, takeProfit=B.dstr(tp) if tp else None)
-            return b
-        try: return self.cl.create_order(**body())
-        except B.BybitError as e:   # account in hedge mode: a definitive rejection, so retrying with the hedge index is safe
-            if e.code == 10001 and "position idx" in str(e.msg).lower() and hasattr(self.cl, "_idx") and not self.cl._idx.get("hedge"):
-                self.cl._idx["hedge"] = True; return self.cl.create_order(**body())
-            raise
+        self.cl.set_leverage(sym, leverage); ps = "LONG" if direction == "long" else "SHORT"
+        b = dict(symbol=sym, side="BUY" if direction == "long" else "SELL", positionSide=ps, type="MARKET" if market else "LIMIT",
+                 quantity=W.dstr(vol), newClientOrderId=cid[:36], reduceOnly=False)
+        if not market: b.update(price=W.dstr(price), timeInForce="GTC")
+        if sl: b.update(slTriggerPrice=W.dstr(sl), SlWorkingType="MARK_PRICE")
+        if tp: b.update(tpTriggerPrice=W.dstr(tp), TpWorkingType="CONTRACT_PRICE")
+        return self.cl.create_order(**b)
     def order(self, sym, cid):
-        o = self.cl.order_by_link(sym, cid[:36])
+        o = self.cl.order_by_client(sym, cid[:36])
         if not o: return None
-        st = o.get("orderStatus")
-        state = "filled" if st == "Filled" else "cancelled" if st in ("Cancelled", "Rejected", "Deactivated", "PartiallyFilledCanceled") else "open"
-        return dict(order_id=str(o.get("orderId")), state=state, filled=float(o.get("cumExecQty") or 0), avg=float(o.get("avgPrice") or 0) or None)
-    def cancel(self, sym, cid): return self.cl.cancel_link(sym, cid[:36])
+        st = str(o.get("status") or "").upper()
+        return dict(order_id=str(o.get("orderId")), state="filled" if st == "FILLED" else "cancelled" if st in ("CANCELED", "CANCELLED", "REJECTED", "EXPIRED") else "open",
+                    filled=float(o.get("executedQty") or 0), avg=float(o.get("avgPrice") or 0) or None)
+    def cancel(self, sym, cid): return self.cl.cancel_client(sym, cid[:36])
     def close(self, pos, vol, price, cid):
-        return self.cl.create_order(symbol=pos["symbol"], side="Sell" if pos["direction"] == "long" else "Buy", orderType="Market", qty=B.dstr(vol),
-                                    timeInForce="IOC", positionIdx=int(pos.get("idx") or 0), orderLinkId=cid[:36], reduceOnly=True)
-    def set_tpsl(self, pos, sl, tp): return self.cl.trading_stop(pos["symbol"], pos.get("idx") or 0, sl=sl, tp=tp)
-    def cancel_tpsl(self, pos): return self.cl.trading_stop(pos["symbol"], pos.get("idx") or 0, sl=0, tp=0)
+        ps = "LONG" if pos["direction"] == "long" else "SHORT"
+        return self.cl.create_order(symbol=pos["symbol"], side="SELL" if ps == "LONG" else "BUY", positionSide=ps, type="MARKET",
+                                    quantity=W.dstr(vol), newClientOrderId=cid[:36], reduceOnly=True)
+    def _algos(self, pos):
+        ps = "LONG" if pos["direction"] == "long" else "SHORT"; out = {"sl": [], "tp": []}
+        for o in self.cl.algo_orders(pos["symbol"]) or []:
+            if str(o.get("positionSide") or "").upper() != ps or str(o.get("algoStatus") or "NEW").upper() not in ("NEW", "UNTRIGGERED", "PENDING"): continue
+            ot = str(o.get("orderType") or "").upper()
+            if not (o.get("reduceOnly") or o.get("closePosition")) or "TRAILING" in ot: continue
+            k = "tp" if ot.startswith("TAKE_PROFIT") else "sl" if ot.startswith("STOP") else None
+            if k: out[k].append(o)
+        return ps, out
+    def set_tpsl(self, pos, sl, tp):
+        ps, al = self._algos(pos)
+        for k, px, plan in (("sl", sl, "STOP_LOSS"), ("tp", tp, "TAKE_PROFIT")):
+            if not px: continue
+            if al.get(k): self.cl.modify_tpsl(al[k][0]["algoId"], px)
+            else: self.cl.place_tpsl(pos["symbol"], ps, plan, px, f"cfx{k}{str(pos.get('pid'))[-20:]}{int(time.time()) % 100000}")
+    def cancel_tpsl(self, pos):
+        ps, al = self._algos(pos)
+        for o in al.get("sl", []) + al.get("tp", []): self.cl.cancel_algo(o["algoId"])
 
-CLS = {"mexc": Mexc, "bybit": Bybit}
+CLS = {"mexc": Mexc, "weex": Weex}
 def wrap(name, x):
     return x if isinstance(x, Base) else CLS[name](x)

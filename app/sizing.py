@@ -1,5 +1,5 @@
 """'Size:' line for crypto signal alerts (user 2026-11-09, t144u) – additive only, for copying the trade by hand on
-Binance / Bybit / MEXC. Uses the same sizing settings as auto-trade (risk USDT ÷ stop distance, capped by the max
+Binance / MEXC / WEEX or any exchange. Uses the same sizing settings as auto-trade (risk USDT ÷ stop distance, capped by the max
 position size, leverage cap or MAX) and is shown even when auto-trade is off. Pure arithmetic, no exchange calls; any
 failure returns None and the alert is sent exactly as before. Setting: size_line (default on)."""
 import json, time

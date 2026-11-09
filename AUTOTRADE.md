@@ -1,8 +1,8 @@
 # MEXC auto-trade add-on
 
 Separate add-on that only READS the signals the bot already generates (signals / don20 / don28 tables) and mirrors them
-as MEXC USDT-M perpetual orders. Signal generation, Telegram signal alerts, the dashboard and the Mini App signal lists
-do not call it; if it or MEXC fails, signals continue unchanged. Code: `app/autotrade.py`, `app/mexc.py`; tests:
+as MEXC USDT-M perpetual orders (WEEX as the fallback). Signal generation, Telegram signal alerts, the dashboard and the Mini App signal lists
+do not call it; if it or MEXC fails, signals continue unchanged. Code: `app/autotrade.py`, `app/mexc.py`, `app/weex.py`, `app/exchanges.py`; tests:
 `tests/test_autotrade.py`.
 
 Ships OFF: master switch off, no strategies enabled, dry-run on, no key.
@@ -20,29 +20,35 @@ Ships OFF: master switch off, no strategies enabled, dry-run on, no key.
 numbers: `/autotrade risk 2`, `maxopen 3`, `lev 5`, `notional 100`, `dailyloss 20`, `timeout 5|10|15|0`.
 Mini App ▸ Auto has the same settings plus open positions, pending limits and PnL (owner-only `/app/api/autotrade`).
 
-## Bybit backup exchange (failover)
-Code: `app/bybit.py` (V5 client), `app/exchanges.py` (MEXC + Bybit adapters, one interface). Settings: primary exchange
-(default MEXC), failover (default: on once Bybit keys exist), per-exchange on/off — `/autotrade primary mexc|bybit`,
-`/autotrade failover on|off|auto`, `/autotrade bybit on|off`, or the panel buttons / Mini App ▸ Auto ▸ Exchanges.
+## WEEX fallback exchange (failover) — exchange order: MEXC (primary) → WEEX (fallback)
+Bybit was removed on 2026-11-09 (user request): `app/bybit.py` is deleted, no route, setting, command or Mini App button
+refers to it, and saved settings that mentioned it are migrated to WEEX on load (auto-trade on/off and dry-run untouched).
+
+Code: `app/weex.py` (WEEX Futures V3 client, `https://api-contract.weex.com/capi/v3`), `app/exchanges.py` (MEXC + WEEX
+adapters, one interface). Settings: primary exchange (default MEXC), failover (default: on once WEEX keys exist),
+per-exchange on/off — `/autotrade primary mexc|weex`, `/autotrade failover on|off|auto`, `/autotrade weex on|off`, or the
+panel buttons / Mini App ▸ Auto ▸ Exchanges. Until all three WEEX env vars exist, WEEX is skipped automatically.
 
 Rules for a NEW order:
-- The backup is used only when the primary can't take it with nothing executed there: failed health check, unreachable /
-  5xx / maintenance before or on placement (MEXC is asked by client order id first when it answers), or the coin isn't
-  tradable on the primary.
-- If the primary's state is unknown (timeout after sending), the signal is NOT sent to the backup (no double position);
+- The fallback is used only when the primary can't take it with nothing executed there: failed health check, unreachable /
+  5xx / maintenance before or on placement (the primary is asked by client order id first when it answers), or the coin
+  isn't tradable on the primary (not listed, API trading not allowed, not enabled).
+- If the primary's state is unknown (timeout after sending), the signal is NOT sent to the fallback (no double position);
   it is resolved by client order id on the next ticks. Business rejections (e.g. balance) never fail over.
 - One auto trade per signal, on one exchange. It is managed (fills, SL/TP updates, partial close, exits) only on the
   exchange it was opened on. If that exchange is down, exits retry every minute; the exchange-side SL/TP still protect it.
-- Bybit: category linear, one-way (hedge index used automatically if the account is in hedge mode), account-default
-  margin mode, leverage set per symbol, SL/TP attached with tpslMode Full, reduce-only market closes, orderLinkId ids.
+- WEEX specifics: quantity in base coin (step = `contractVal`, min `minOrderSize`, max min(`maxOrderSize`,
+  `marketOpenLimitSize`)), only pairs in `/capi/v3/market/apiTradingSymbols` are traded; `side` BUY/SELL + `positionSide`
+  LONG/SHORT (works in combined and separated mode); account-default margin mode, leverage set per symbol
+  (`/capi/v3/account/leverage`); SL/TP attached to the entry (`slTriggerPrice`/`tpTriggerPrice`), later moved with
+  `/capi/v3/modifyTpSlOrder` (or placed full-position with `/capi/v3/placeTpSlOrder`); reduce-only market closes;
+  `newClientOrderId` (≤ 36 chars) looked up via open orders + order history. Leverage MAX uses `/capi/v3/market/riskLimits`.
 
-### Adding the Bybit key (on the server only, never in chat)
-Bybit ▸ API ▸ Create New Key ▸ System-generated ▸ "API Transaction". Permissions: **Contract (Derivatives) → Orders +
-Positions** (read-write). Leave Withdraw, Transfer/Asset exchange, Earn, Spot-margin, Copy-trading etc. unticked. Bind IP
-**your server's public IP**. Then add `BYBIT_API_KEY=...` and `BYBIT_API_SECRET=...` to `/etc/fvg-signal-bot.env` and
-`sudo systemctl restart fvg-signal-bot`. Note: the server IP geolocates to the UK; Bybit's public API answers from it, but
-private (trading) calls can still be refused by Bybit's region rules (codes 10009 / 10024 / HTTP 403). The first `/autotrade`
-dry-run / health check after adding the key shows this.
+### Adding the WEEX key (on the server only, never in chat)
+WEEX ▸ API Management (https://www.weex.com/account/newapi) ▸ create key with a passphrase. Permissions: **Read** +
+**Futures/Contract trade** only — no withdrawal / transfer. Bind IP **your server's public IP**. Then add three lines to
+`/etc/fvg-signal-bot.env`: `WEEX_API_KEY=...`, `WEEX_API_SECRET=...`, `WEEX_API_PASSPHRASE=...` and
+`sudo systemctl restart fvg-signal-bot` (no daemon-reload needed). The passphrase can't be recovered; if lost, make a new key.
 
 ### MEXC balance permission
 If the MEXC key lacks "View Account Details" (MEXC code 700007), auto-trade shows a note in Telegram (max every 12 h) and
@@ -50,7 +56,7 @@ the Mini App, skips its own margin pre-check, and lets MEXC reject an order if m
 
 ## Leverage MAX, max position size, Limit → Market (t142u)
 - Leverage: `cap` (≤ N x, `/autotrade lev 5`) or `max` (`/autotrade lev max`): the exchange's highest leverage for the coin
-  AND the order's size tier (MEXC contract risk tiers by volume; Bybit /v5/market/risk-limit by position value). In both
+  AND the order's size tier (MEXC contract risk tiers by volume; WEEX /capi/v3/market/riskLimits notional brackets). In both
   modes a guard steps leverage down 1x at a time while the estimated isolated liquidation price
   (entry × (1 ∓ 1/lev ± maintenance-margin rate)) is at or inside the stop; this is logged and saved in the row note. Size is
   always risk ÷ stop distance; leverage only changes the margin used.
