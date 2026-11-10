@@ -28,6 +28,9 @@ class Skip(Exception):
 class MinSize(Skip):
     """The size from the user's settings is below the exchange minimum and the min-order bump is off or would exceed its cap.
     Nothing was sent, so the next exchange in the route (if any) may still take the signal."""
+class NoBalance(Skip):
+    """% of balance sizing can't read this exchange's available USDT (no key / permission / read failed). Nothing was sent,
+    so the next exchange in the route (if any) may still take the signal."""
 class NotListed(Skip):
     """The symbol is not tradable by API on this exchange (not listed / API not allowed / not enabled) -> backup may take it."""
 PERM_CODES = (700007,)

@@ -41,7 +41,11 @@ FEE = float(os.getenv("AUTOTRADE_FEE", "0.0005"))               # MEXC API futur
 DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="limit",
                 limit_timeout_min=15, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
                 exchanges=["mexc", "weex"], lev_mode="cap", size_line=True,
-                min_bump=True, bump_max_risk_usdt=0.0, bump_max_margin_usdt=0.0)   # bump caps: risk 0 = auto (2x risk_usdt), margin 0 = off
+                min_bump=True, bump_max_risk_usdt=0.0, bump_max_margin_usdt=0.0,
+                sizing_mode="risk", margin_usdt=1.0, risk_pct=1.0)   # sizing: risk ($ risk_usdt) | margin (margin_usdt x leverage) | pct (risk_pct % of balance at the stop)
+SIZING = ("risk", "margin", "pct")
+SIZING_LABEL = {"risk": "$ risk", "margin": "Fixed margin", "pct": "% of balance"}
+BAL_KEY = "autotrade:balance"   # last available-USDT read per exchange (for the 📐 Size line in % mode); own kv key   # bump caps: risk 0 = auto (2x risk_usdt), margin 0 = off
 EX_MODES = (("mexc",), ("weex",), ("mexc", "weex"), ("weex", "mexc"))
 EX_MODE_LABEL = {("mexc",): "MEXC only", ("weex",): "WEEX only", ("mexc", "weex"): "MEXC → WEEX", ("weex", "mexc"): "WEEX → MEXC"}
 LEGACY_EX = ("primary_exchange", "failover", "ex_on")   # pre-2026-11-10 exchange settings, migrated to `exchanges` on load
@@ -168,6 +172,11 @@ def validate(patch, cur):
                 if not y and x in cur: cur.remove(x)
             if not cur: raise ValueError("keep at least one exchange enabled")
             s["exchanges"] = cur
+        elif k == "sizing_mode":
+            if v not in SIZING: raise ValueError("sizing mode must be risk, margin or pct")
+            s[k] = v
+        elif k == "margin_usdt": s[k] = round(_num(v, 0.1, 1000000, "Fixed margin per trade (USDT)"), 4)
+        elif k == "risk_pct": s[k] = round(_num(v, 0.01, 20, "% of balance risked per trade"), 4)
         elif k == "min_bump": s[k] = bool(v)
         elif k == "bump_max_risk_usdt": s[k] = round(_num(v, 0, 100000, "Bump cap: max risk per trade (USDT, 0 = auto 2× risk)"), 4)
         elif k == "bump_max_margin_usdt": s[k] = round(_num(v, 0, 10000000, "Bump cap: max margin per trade (USDT, 0 = off)"), 2)
@@ -225,7 +234,12 @@ def failover_on(s): return len(exchanges_of(s)) > 1
 def ex_on(s, name): return name in exchanges_of(s)
 def mode_label(s): return EX_MODE_LABEL.get(tuple(exchanges_of(s)), " → ".join(X.LABEL[x] for x in exchanges_of(s)))
 def bump_cap(s):
-    r = float(s.get("bump_max_risk_usdt") or 0); return r if r > 0 else M.BUMP_AUTO_X * float(s["risk_usdt"])
+    """Bump risk cap in USDT; None = auto 2x each trade's own risk (fixed-margin / % modes, where it varies per trade)."""
+    r = float(s.get("bump_max_risk_usdt") or 0)
+    if r > 0: return r
+    return M.BUMP_AUTO_X * float(s["risk_usdt"]) if (s.get("sizing_mode") or "risk") == "risk" else None
+def bump_cap_txt(s):
+    c = bump_cap(s); return f"${c:g}" if c is not None else "2× the trade's risk"
 def route(s, ads):
     """Exchanges to try for a NEW order, in the user's order (`exchanges`); live skips an exchange without its key."""
     live = not s["dry_run"]
@@ -281,7 +295,7 @@ def _wat_day_start(now):
 
 class Ctx:
     """Per-tick context: exchange adapters + lazily fetched positions (one call per exchange per tick)."""
-    def __init__(self, ads, px, now): self.ads, self.px, self.now = ads, px, now; self._pos = {}; self.msgs = []
+    def __init__(self, ads, px, now): self.ads, self.px, self.now = ads, px, now; self._pos = {}; self.msgs = []; self.bal = {}
     @property
     def cl(self): return getattr(self.ads.get("mexc"), "cl", None)
     def ad(self, r_or_name):
@@ -341,7 +355,7 @@ def manage(ctx, r, src, s):
         if fill:
             cs = (r["qty"] / r["vol"]) if r["vol"] else 0
             _upd(r["id"], status="filled", filled_at=iso(now), fill_price=fill[0], vol=fill[1], qty=fill[1] * cs)
-            ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'} · risk {float(r['risk_usdt'] or 0):.2f} USDT\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing") + bump_line(_bump_of(r))); return
+            ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'} · ${fill[1] * cs * fill[0]:,.2f} position · risk {float(r['risk_usdt'] or 0):.2f} USDT\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing") + bump_line(_bump_of(r))); return
         reason = None; timed_out = False
         try: nt = json.loads(r.get("note") or "{}"); to = int(nt.get("timeout", 0)); conv = bool(nt.get("then_market"))
         except Exception: to, conv = 0, False
@@ -427,12 +441,39 @@ def candidates(s, sigs, dons, known):
                         sl=float(r["stop"]), tp=None, t=t))
     out.sort(key=lambda c: c["t"] or utcnow()); return out
 
-def _sized(ad, con, c, ref, sl, direction, s):
-    """Risk ÷ stop-distance size (exchange step / min / max position size), then leverage: cap or MAX for the size tier,
-    stepped down while the estimated liquidation price is at or inside the stop."""
-    z = M.size(c, ref, sl, s["risk_usdt"], s.get("max_notional_usdt") or 0, 10**6,
-               bump=bool(s.get("min_bump", True)), bump_max_risk=float(s.get("bump_max_risk_usdt") or 0))
-    lev, info = X.choose_leverage(ad, con, c, z["vol"], z["notional"], ref, sl, direction, s.get("lev_mode") or "cap", s["leverage"])
+def _sized(ad, con, c, ref, sl, direction, s, bal=None):
+    """Size, then leverage (cap or MAX for the size tier, stepped down while the estimated liquidation price is at or
+    inside the stop). Sizing modes (user 2026-11-10, t158u):
+      risk   : qty = risk_usdt / stop distance
+      pct    : risk_usdt = risk_pct % of `bal` (available USDT on THIS exchange), then as risk
+      margin : notional = margin_usdt x leverage -> qty = notional / price; leverage is found first (cap or MAX tier, with
+               the liquidation guard) and iterated down until it fits the resulting size tier.
+    All modes then go through the same exchange step / minimum (+ min-order bump and caps) / max position size / maxVol."""
+    mode = s.get("sizing_mode") or "risk"; lm = s.get("lev_mode") or "cap"; dist = abs(float(ref) - float(sl))
+    if dist <= 0 or ref <= 0: raise M.Skip("stop distance is zero")
+    def sz(risk): return M.size(c, ref, sl, risk, s.get("max_notional_usdt") or 0, 10**6,
+                                bump=bool(s.get("min_bump", True)), bump_max_risk=float(s.get("bump_max_risk_usdt") or 0))
+    def chl(z): return X.choose_leverage(ad, con, c, z["vol"], z["notional"], ref, sl, direction, lm, s["leverage"])
+    if mode == "pct":
+        if bal is None: raise M.NoBalance(f"% of balance sizing: {ad.label} balance unknown")
+        risk = float(bal) * float(s.get("risk_pct") or 1) / 100
+        if risk <= 0: raise M.NoBalance(f"% of balance sizing: {ad.label} available balance is {float(bal):.2f} USDT")
+        meta = dict(mode="pct", pct=float(s.get("risk_pct") or 1), balance=round(float(bal), 2), risk_target=round(risk, 4), ex=ad.name)
+        z = sz(risk); lev, info = chl(z)
+    elif mode == "margin":
+        m = float(s.get("margin_usdt") or 1)
+        lt = int(ad.tier(con, c, 0, 0)["max_lev"]) if lm == "max" else max(1, min(int(s["leverage"]), int(float(c.get("maxLeverage") or s["leverage"]))))
+        for _ in range(10):
+            z = sz(m * lt * dist / float(ref)); l2, info = chl(z)
+            if l2 >= lt: break
+            lt = l2
+        else: z = sz(m * lt * dist / float(ref)); _, info = chl(z)
+        lev = lt; info = dict(info, chosen=lev, liq=round(X.liq_price(float(ref), lev, float(info["mmr"]), direction), 10))
+        meta = dict(mode="margin", margin_target=m, lev=lev)
+    else:
+        meta = dict(mode="risk", risk_target=float(s["risk_usdt"]))
+        z = sz(s["risk_usdt"]); lev, info = chl(z)
+    z["sizing"] = meta
     if info.get("stepped_from"):
         print(f"[autotrade] leverage {info['stepped_from']}x -> {lev}x on {ad.label} {con}: est. liquidation {info['liq']:g} must be beyond the stop {sl:g}", flush=True)
     z.update(leverage=lev, margin=round(z["notional"] / lev, 4), lev_info=info)
@@ -442,6 +483,39 @@ def _sized(ad, con, c, ref, sl, direction, s):
         if mcap and z["margin"] > mcap + 1e-9:
             raise M.MinSize(f"{ad.label} minimum order {b['to_vol']:g} {b['unit']} needs ${z['margin']:.2f} margin at {lev}x, above the bump margin cap ${mcap:g}")
     return z
+def sizing_line(z):
+    """'📏' alert line for the fixed-margin / % of balance modes ('' in $ risk mode): how the size was found."""
+    m = (z or {}).get("sizing") or {}
+    if m.get("mode") == "margin":
+        return f"\n📏 Fixed margin ${m['margin_target']:g} × {z['leverage']}x → ${z['notional']:,.2f} position · margin ${z['margin']:.2f} · risk ${z['risk']:.2f} at the stop"
+    if m.get("mode") == "pct":
+        return (f"\n📏 {m['pct']:g}% of {X.LABEL.get(m.get('ex'), '')} balance ${m['balance']:,.2f} = ${m['risk_target']:.2f} risk → "
+                f"${z['notional']:,.2f} position · risk ${z['risk']:.2f} at the stop")
+    return ""
+def _bal_cache():
+    try: raw = db.kv_get(BAL_KEY); return json.loads(raw) if raw else {}
+    except Exception: return {}
+def _save_bal(ex, v):
+    try:
+        raw = db.kv_get(BAL_KEY); d = json.loads(raw) if raw else {}
+        d[ex] = dict(v=round(float(v), 4), t=iso(utcnow())); db.kv_set(BAL_KEY, json.dumps(d))
+    except Exception as e: _err("save balance", e)
+def _balance(ctx, ad, s):
+    """Available USDT on this exchange for % of balance sizing (one read per exchange per tick). Read-only private call,
+    also in dry-run (the user asked for live balance); raises M.NoBalance with the reason when it can't be read."""
+    ex = ad.name; v = ctx.bal.get(ex)
+    if isinstance(v, Exception): raise v
+    if v is not None: return v
+    try:
+        if not X.key_present(ex): raise M.NoBalance(f"% of balance sizing needs the {ad.label} balance, but no {ad.label} API key is set" + (" (dry-run)" if s["dry_run"] else ""))
+        v = float(ad.usdt_available()); STATE["perm"].pop(ex, None); _save_bal(ex, v); ctx.bal[ex] = v; return v
+    except M.NoBalance as e: ctx.bal[ex] = e; raise
+    except (M.NoPermission, W.NoPermission):
+        _perm(ctx, ex, s); e = M.NoBalance(f"% of balance sizing: the {ad.label} key can't read the balance (permission)"); ctx.bal[ex] = e; raise e
+    except (M.RateLimited, W.RateLimited): raise
+    except Exception as e:
+        if not s["dry_run"] and X.kind(e): raise   # live: exchange down -> caller fails over
+        x = M.NoBalance(f"% of balance sizing: reading the {ad.label} balance failed ({X.short(e)[:100]})"); ctx.bal[ex] = x; raise x
 def bump_line(b, ex=None):
     """'⬆️ Min-order bump' alert line (original vs bumped size and $ risk), or '' when the order was not bumped."""
     if not b: return ""
@@ -468,11 +542,16 @@ def _market_ok(r, src, p, don):
 def _to_market(ctx, r, p, s, to):
     """Unfilled limit (already cancelled) -> market entry on the SAME exchange, re-sized at the live price."""
     now = ctx.now; live = not r["dry"]; ex = exof(r); ad = ctx.ad(ex); con = r["contract"]
-    c = ad.instrument(con); z = _sized(ad, con, c, p, float(r["init_sl"] or r["sl"]), r["direction"], s)
+    c = ad.instrument(con); bal = None
+    if (s.get("sizing_mode") or "risk") == "pct":
+        try: bal = _balance(ctx, ad, s)
+        except M.Skip: raise
+        except Exception as x: raise M.NoBalance(f"% of balance sizing: {ad.label} balance read failed ({X.short(x)[:100]})")
+    z = _sized(ad, con, c, p, float(r["init_sl"] or r["sl"]), r["direction"], s, bal)
     ext = (r["ext_oid"] + "m")[:32 if ex == "mexc" else 36]; e = M.round_price(p, c)
     upd = dict(order_type="market", entry=e, vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"],
-               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"), **({"bump": z["bump"]} if z.get("bump") else {}))))
-    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + bump_line(z.get("bump"))
+               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"), sizing=z.get("sizing"), **({"bump": z["bump"]} if z.get("bump") else {}))))
+    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · ${z['notional']:,.2f} position · risk {z['risk']:.2f} USDT" + sizing_line(z) + bump_line(z.get("bump"))
     if not live:
         _upd(r["id"], status="filled", filled_at=iso(now), fill_price=e, **upd); ctx.msg(r, head); return
     _upd(r["id"], status="placing", **upd)
@@ -505,14 +584,15 @@ def open_trade(ctx, s, cnd):
         try: return _open_on(ctx, s, cnd, ad, rid, why)
         except X.Unavailable as e:
             why.append(str(e)); rid = e.row_id or rid
-        except M.MinSize as e:   # raised before any order call: safe to try the next exchange
-            why.append(str(e) if str(e).startswith(ad.label) else f"{ad.label}: {e}"); minsz = True
+        except (M.MinSize, M.NoBalance) as e:   # raised before any order call: safe to try the next exchange
+            why.append(str(e) if str(e).startswith(ad.label) else f"{ad.label}: {e}"); minsz = minsz or type(e)
+
     msg = "; ".join(why) or "no exchange available"
     if rid:   # a placement failed with nothing executed and no backup could take it
         _upd(rid, status="error", closed_at=iso(ctx.now), note=json.dumps(dict(error=msg[:300])))
         ctx.msgs.append((s["dry_run"], f"⚠️ <b>AUTO · not placed</b> {cnd['symbol']} · {cnd['strategy']} #{cnd['ref_id']}\n<i>{msg[:300]}</i>"))
         return None
-    raise (M.MinSize if minsz else M.Skip)(msg)
+    raise (minsz or M.Skip)(msg)
 
 def _open_on(ctx, s, cnd, ad, rid, why):
     now = ctx.now; live = not s["dry_run"]; ex = ad.name
@@ -532,15 +612,23 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     if tp and ((p >= tp) if long else (p <= tp)): raise M.Skip("price already beyond the target")
     market = s["order_type"] == "market"
     if market and R and abs(p - entry) > MAX_SLIP_R * R: raise M.Skip(f"price moved {abs(p-entry)/R:.2f}R from the entry")
-    ref = p if market else entry
-    z = _sized(ad, con, c, ref, sl, cnd["direction"], s)
+    ref = p if market else entry; bal = None
+    if (s.get("sizing_mode") or "risk") == "pct":
+        try: bal = _balance(ctx, ad, s)
+        except (M.Skip, M.RateLimited, W.RateLimited): raise
+        except Exception as e:
+            if X.kind(e): raise down(e, "unreachable (balance)")
+            raise
+    z = _sized(ad, con, c, ref, sl, cnd["direction"], s, bal)
     if live:
         try:
             fp = ad.fair_price(con)
             if fp and abs(fp - p) / p > MAX_PX_DEV: raise M.Skip(f"{ad.label} price {fp:g} differs from Binance {p:g} by {abs(fp-p)/p*100:.1f}% (different contract)")
             if ctx.position(ex, con, "long") or ctx.position(ex, con, "short"): raise M.Skip(f"there is already a {ad.label} position on {con} (manual?)")
-            try: av = ad.usdt_available(); STATE["perm"].pop(ex, None)
-            except (M.NoPermission, W.NoPermission): av = None; _perm(ctx, ex, s)
+            if bal is not None: av = bal   # % of balance mode: already read this tick
+            else:
+                try: av = ad.usdt_available(); STATE["perm"].pop(ex, None)
+                except (M.NoPermission, W.NoPermission): av = None; _perm(ctx, ex, s)
             if av is not None and av < z["margin"] * 1.05:
                 if z.get("bump"): raise M.MinSize(f"not enough USDT margin on {ad.label} for the bumped minimum order ({av:.2f} available, {z['margin']:.2f} needed)")
                 raise M.Skip(f"not enough USDT margin on {ad.label} ({av:.2f} available, {z['margin']:.2f} needed)")
@@ -555,15 +643,15 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     row = dict(strategy=cnd["strategy"], symbol=cnd["symbol"], contract=con, direction=cnd["direction"], exchange=ex,
                order_type="market" if market else s["order_type"], entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
                init_sl=float(sl), vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"], ext_oid=ext,
-               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}), **({"bump": z["bump"]} if z.get("bump") else {}))))
+               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), sizing=z.get("sizing"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}), **({"bump": z["bump"]} if z.get("bump") else {}))))
     full = dict(row, source=cnd["source"], ref_id=cnd["ref_id"])
-    fo_line = (("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else "") + bump_line(z.get("bump"), ex)
+    fo_line = (("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else "") + sizing_line(z) + bump_line(z.get("bump"), ex)
     if not live:   # dry-run: no private call; market fills at the live price now, limit waits for the fill
         row.update(status="filled" if market else "open_order")
         if market: row.update(fill_price=row["entry"], filled_at=iso(now))
         if rid: _upd(rid, **row); i = rid
         else: i = _insert(source=cnd["source"], ref_id=cnd["ref_id"], **row)
-        if i and (market or why or z.get("bump")): ctx.msg(full, _hdr(full, "✅" if market else "📝", ("filled (market)" if market else "limit placed") + via) + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + fo_line)
+        if i and (market or why or z.get("bump") or sizing_line(z)): ctx.msg(full, _hdr(full, "✅" if market else "📝", ("filled (market)" if market else "limit placed") + via) + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · ${z['notional']:,.2f} position · risk {z['risk']:.2f} USDT" + fo_line)
         print(f"[autotrade] DRY {ex} {row['order_type']} {row['direction']} {con} vol={z['vol']:g} @ {row['entry']} sl={row['sl']} tp={row['tp']} ({cnd['strategy']} #{cnd['ref_id']})", flush=True)
         return i
     if rid: _upd(rid, status="placing", **row); i = rid
@@ -574,7 +662,7 @@ def _open_on(ctx, s, cnd, ad, rid, why):
         oid = ad.place_open(con, cnd["direction"], z["vol"], row["entry"], market, z["leverage"], row["sl"], row["tp"], ext)
         _upd(i, status="open_order", order_id=oid)
         print(f"[autotrade] LIVE {ex} {row['order_type']} {row['direction']} {con} vol={z['vol']:g} @ {row['entry']} ({cnd['strategy']} #{cnd['ref_id']}) order {oid}", flush=True)
-        if why or z.get("bump"): ctx.msg(full, _hdr(full, "↪️" if why else "📝", f"order placed{via}") + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + fo_line)
+        if why or z.get("bump") or sizing_line(z): ctx.msg(full, _hdr(full, "↪️" if why else "📝", f"order placed{via}") + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · ${z['notional']:,.2f} position · risk {z['risk']:.2f} USDT" + fo_line)
         return i
     except (M.RateLimited, W.RateLimited): raise   # stays 'placing'; resolved by client order id next tick
     except Exception as e:
@@ -647,9 +735,9 @@ def tick(cl=None, px_fn=None, now=None):
                 if open_trade(ctx, s, cnd): n_open += 1; held.add(cnd["symbol"]); res["opened"] += 1
             except M.Skip as e:
                 res["skipped"] += 1; STATE["skips"].append(dict(t=iso(now), sym=cnd["symbol"], k=cnd["strategy"], why=str(e)))
-                if isinstance(e, M.MinSize):   # the user asked to see these: size vs exchange minimum / bump cap
+                if isinstance(e, (M.MinSize, M.NoBalance)):   # the user asked to see these: size vs exchange minimum / bump cap, balance
                     from .telegram import esc
-                    ctx.msgs.append((s["dry_run"], f"⏭️ <b>AUTO · skipped (minimum order)</b>{' · 🧪 DRY-RUN' if s['dry_run'] else ''}\n{esc(cnd['symbol'])} · {esc(cnd['strategy'])} #{cnd['ref_id']}\n<i>{esc(str(e)[:300])}</i>"))
+                    ctx.msgs.append((s["dry_run"], f"⏭️ <b>AUTO · skipped ({'minimum order' if isinstance(e, M.MinSize) else 'balance'})</b>{' · 🧪 DRY-RUN' if s['dry_run'] else ''}\n{esc(cnd['symbol'])} · {esc(cnd['strategy'])} #{cnd['ref_id']}\n<i>{esc(str(e)[:300])}</i>"))
                 try: _insert(source=cnd["source"], ref_id=cnd["ref_id"], strategy=cnd["strategy"], symbol=cnd["symbol"], direction=cnd["direction"],
                              entry=cnd["entry"], sl=cnd["sl"], tp=cnd["tp"], status="skipped", dry=1 if s["dry_run"] else 0, note=json.dumps(dict(skip=str(e)[:200])))
                 except Exception as x: _err("record skip", x)
@@ -730,12 +818,18 @@ def view():
     for r in rows: r["exchange"] = exof(r)
     pub["exchanges"] = exchanges_of(s); pub["primary_exchange"] = pub["exchanges"][0]   # primary_exchange: read-only, for old Mini App builds
     return dict(settings=pub, key_present=M.key_present(), exchanges=exs, failover=failover_on(s), exchange_mode=",".join(exchanges_of(s)), exchange_mode_label=mode_label(s),
-                exchange_modes=[dict(value=",".join(m), label=EX_MODE_LABEL[m]) for m in EX_MODES], bump_cap_risk=round(bump_cap(s), 4), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"]) for k in STRATS],
+                exchange_modes=[dict(value=",".join(m), label=EX_MODE_LABEL[m]) for m in EX_MODES], bump_cap_risk=round(bump_cap(s), 4) if bump_cap(s) is not None else None, bump_cap_text=bump_cap_txt(s),
+                sizing_modes=[dict(value=k, label=SIZING_LABEL[k]) for k in SIZING], sizing_desc=sizing_desc(s), balances=_bal_cache(), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"]) for k in STRATS],
                 timeouts=list(TIMEOUTS), active=act, recent=[r for r in rows if r["status"] not in ACTIVE][:60], live=summ(False), dry=summ(True),
                 worker=dict(last_tick=STATE["last_tick"], last_result=STATE["last_result"], poll_s=POLL_S, errors=list(STATE["errors"])[-8:], skips=list(STATE["skips"])[-10:]),
                 exchange=dict(name=" → ".join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or "none", base=M.BASE,
                               order_api="MEXC USDT-M perpetual · WEEX V3 USDT-M perpetual · order: " + mode_label(s)))
 
+def sizing_desc(s):
+    m = s.get("sizing_mode") or "risk"
+    if m == "margin": return f"fixed margin {float(s.get('margin_usdt') or 1):g} USDT × leverage per trade"
+    if m == "pct": return f"{float(s.get('risk_pct') or 1):g}% of the exchange's available USDT risked at the stop"
+    return f"$ risk {s['risk_usdt']:g} USDT per trade at the stop"
 def panel_text():
     from .telegram import esc
     s = settings(); v = None
@@ -750,13 +844,13 @@ def panel_text():
     def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · not used")
     emode = (f"<b>{X.LABEL[exl[0]]}</b> first, <b>{X.LABEL[exl[1]]}</b> as fallback" if len(exl) > 1 else f"<b>{X.LABEL[exl[0]]} only</b>")
     nokey = [X.LABEL[x] for x in exl if not X.key_present(x)]
-    bcap = f"risk ≤ ${bump_cap(s):g}" + (" (auto 2× risk)" if not float(s.get("bump_max_risk_usdt") or 0) else "") + (f" · margin ≤ ${float(s['bump_max_margin_usdt']):g}" if float(s.get("bump_max_margin_usdt") or 0) else "")
+    bcap = f"risk ≤ {bump_cap_txt(s)}" + (" (auto 2× risk)" if not float(s.get("bump_max_risk_usdt") or 0) and bump_cap(s) is not None else "") + (f" · margin ≤ ${float(s['bump_max_margin_usdt']):g}" if float(s.get("bump_max_margin_usdt") or 0) else "")
     L = ["🤖 <b>Auto-trade · MEXC + WEEX futures</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
          f"🏦 Exchanges: <b>{esc(mode_label(s))}</b> · {emode}",
          f"🔑 {kl('mexc')} · {kl('weex')}",
          f"↪️ Route: <b>{esc(' → '.join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or 'none')}</b>" + (f" <i>({esc(', '.join(nokey))} skipped live until its API key is set)</i>" if nokey else ""),
          f"⬆️ Min-order bump: <b>{'ON' if s.get('min_bump', True) else 'OFF'}</b>" + (f" · up to {esc(bcap)}, else skip" if s.get("min_bump", True) else " · below-minimum sizes are skipped"),
-         f"💵 Risk <b>{s['risk_usdt']:g} USDT</b>/trade · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
+         f"💵 Sizing: <b>{esc(sizing_desc(s))}</b> · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
          f"🧾 Order: {esc(ot)}",
          f"🧱 Max position size: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} <i>(caps qty × price per trade)</i> · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
          f"📐 Size line on signal alerts: {'ON' if s.get('size_line', True) else 'OFF'}",
@@ -767,6 +861,7 @@ def panel_text():
     for n, note in STATE["perm"].items(): L.append("⚠️ " + esc(note))
     L += ["", "<i>Signals and alerts are never paused or changed by auto-trade. Each trade stays on the exchange it was opened on.</i>",
           "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> or <code>lev max</code> · <code>size 100</code> (max position size) · <code>dailyloss 20</code> (0 = off) · <code>sizeline on|off</code>",
+          "Sizing: <code>/autotrade sizing risk|margin|pct</code> · <code>margin 5</code> (USDT margin per trade) · <code>pct 1</code> (% of balance risked at the stop) – setting a number never switches the mode",
           "Exchanges: <code>/autotrade exchanges mexc</code> · <code>weex</code> · <code>mexc,weex</code> · <code>weex,mexc</code>",
           "Min-order bump: <code>/autotrade minbump on|off</code> · <code>bumprisk 2</code> (max $ risk when bumped, 0 = auto 2× risk) · <code>bumpmargin 5</code> (max $ margin when bumped, 0 = off)"]
     return "\n".join(L)
@@ -782,12 +877,14 @@ def panel_markup():
     cur = tuple(exchanges_of(s))
     em = [B(("● " if cur == m else "") + EX_MODE_LABEL[m], "at:em:" + ",".join(m)) for m in EX_MODES]
     rows += [em[:2], em[2:]]
-    rows.append([B(("✅" if s.get("min_bump", True) else "⬜") + f" Min-order bump (≤ ${bump_cap(s):g} risk)", "at:mb")])
+    sm = s.get("sizing_mode") or "risk"
+    rows.append([B(("● " if sm == k else "") + {"risk": "$ risk", "margin": "Fixed margin", "pct": "% balance"}[k], "at:sm:" + k) for k in SIZING])
+    rows.append([B(("✅" if s.get("min_bump", True) else "⬜") + f" Min-order bump (≤ {bump_cap_txt(s)} risk)", "at:mb")])
     rows.append([B("🛑 Flatten all…", "at:fl"), B("↻ Refresh", "at:rf")])
     return {"inline_keyboard": rows}
 NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt", "size": "max_notional_usdt",
        "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min",
-       "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt"}
+       "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt", "margin": "margin_usdt", "pct": "risk_pct"}
 def tg_command(text):
     """/autotrade [on|off|risk N|maxopen N|lev N|notional N|dailyloss N|timeout N] -> (reply text, markup or None)."""
     a = text.split()[1:]
@@ -799,12 +896,15 @@ def tg_command(text):
             elif w in ("limit", "market", "limit_market", "limitmarket"): save_settings(dict(order_type="limit_market" if w.startswith("limit") and w != "limit" else w))
             elif w == "sizeline" and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(size_line=a[1].lower() == "on"))
             elif w in ("exchanges", "exchange", "ex") and len(a) > 1: save_settings(dict(exchanges=",".join(a[1:])))
+            elif w in ("sizing", "sizingmode", "mode") and len(a) > 1:
+                m = {"risk": "risk", "$": "risk", "usd": "risk", "margin": "margin", "fixed": "margin", "pct": "pct", "%": "pct", "percent": "pct", "balance": "pct"}.get(a[1].lower(), a[1].lower())
+                save_settings(dict(sizing_mode=m))
             elif w in ("minbump", "bump") and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(min_bump=a[1].lower() == "on"))
             elif w == "primary" and len(a) > 1: save_settings(dict(primary_exchange=a[1].lower()))
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
             else: return ("Usage: /autotrade [on|off|limit|market|limit_market|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
-                          "exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
+                          "sizing risk|margin|pct|margin N|pct N|exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
 def tg_callback(data):
@@ -825,6 +925,7 @@ def tg_callback(data):
         k = d[2:]; cur = list(s["strategies"]); cur = [x for x in cur if x != k] if k in cur else cur + [k]
         save_settings(dict(strategies=cur)); return f"{k} {'on' if k in cur else 'off'}", panel_text(), panel_markup(), None
     try:
+        if d.startswith("sm:"): s = save_settings(dict(sizing_mode=d[3:])); return "Sizing: " + SIZING_LABEL[s["sizing_mode"]], panel_text(), panel_markup(), None
         if d.startswith("em:"): s = save_settings(dict(exchanges=d[3:])); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
         if d == "mb": s = save_settings(dict(min_bump=not s.get("min_bump", True))); return "Min-order bump " + ("ON" if s["min_bump"] else "OFF"), panel_text(), panel_markup(), None
         # legacy buttons (panels sent before 2026-11-10)

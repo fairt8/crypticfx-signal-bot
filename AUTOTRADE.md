@@ -41,6 +41,37 @@ WEEX): failover auto/on → both (primary first), off → primary only, disabled
 (primary MEXC, failover auto, both on) became `["mexc","weex"]`; the old keys are removed on the next save;
 enabled / dry_run are never touched.
 
+## Sizing modes (t158u, 2026-11-10) — default `$ risk`, the others are inactive until picked
+Setting `sizing_mode`: `risk` (default; all saved settings without it load as `risk`) · `margin` · `pct`.
+`/autotrade sizing risk|margin|pct` · `/autotrade margin N` (fixed USDT margin per trade, default 1) ·
+`/autotrade pct N` (% of balance risked at the stop, 0.01–20, default 1). Setting a number never switches the mode.
+Telegram panel: three buttons (`at:sm:risk|margin|pct`); Mini App ▸ Auto ▸ Position sizing: mode selector + the three
+number fields (saved with "Save numbers").
+
+| Mode | Size | $ risk at the stop |
+|---|---|---|
+| $ risk | qty = risk_usdt ÷ \|entry − stop\| | ≈ risk_usdt (rounded DOWN to the step) |
+| Fixed margin | notional = margin_usdt × leverage, qty = notional ÷ price | qty × stop distance = margin × leverage × stop % (varies per trade) |
+| % of balance | risk_usdt = risk_pct % × available USDT on the opening exchange, then as $ risk | ≈ that % of the balance |
+
+- % of balance is the "% risked at the stop" design (not % as margin): it keeps risk per trade constant as the account
+  grows/shrinks. The balance is read live (`usdt_available`, a read-only private call) from the exchange that would open
+  the trade, once per exchange per tick, and reused for the margin check. This read also happens in dry-run (the only
+  private call dry-run makes, and only in this mode). If it can't be read (no key, missing balance permission, read
+  error) the exchange is skipped with the reason, the next exchange in the route is tried, and if none works Telegram
+  gets "⏭️ AUTO · skipped (balance)". In LIVE mode an unreachable exchange fails over as usual.
+- Fixed margin: leverage is found first (cap: min(cap, coin max); MAX: the coin's highest tier), the size is computed,
+  then the tier + liquidation guard is checked for that size and leverage is lowered until it fits (lower leverage →
+  smaller position → never a higher tier). Rounding is DOWN, so margin never exceeds the setting (except a min-order bump).
+- In every mode the same steps follow: exchange step / minimum + min-order bump (auto cap = 2× that trade's own risk in
+  margin/% modes, or `bumprisk`; `bumpmargin`), max position size, maxVol, leverage cap / MAX + liquidation guard, live
+  balance check (margin + 5%), price sanity. Every auto alert shows the position (qty and $ value) and the $ risk at the
+  stop; margin / % trades add a "📏" line (e.g. "Fixed margin $20 × 5x → $100.00 position · margin $20.00 · risk $1.00 at
+  the stop" or "1% of MEXC balance $640.00 = $6.40 risk → …"). The row note keeps `sizing`.
+- 📐 Size line on signal alerts: margin mode = margin × leverage cap (MAX: estimated as the highest leverage whose
+  liquidation is beyond the stop, labelled "est."); % mode = % of the last balance auto-trade read (kv `autotrade:balance`),
+  or "risk N% of balance (balance not read yet)" before any read.
+
 ## Minimum-order bump (t156u, 2026-11-10)
 If the size from your risk (risk USDT ÷ stop distance, rounded DOWN to the exchange step, capped by max position size)
 is below that contract's minimum order (MEXC `minVol` contracts / WEEX `minOrderSize`, one volume step, and

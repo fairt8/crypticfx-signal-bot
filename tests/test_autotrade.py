@@ -777,7 +777,9 @@ def test_size_line_on_don_entry(monkeypatch, fresh):
 
 def test_sizing_module_is_pure():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "sizing.py")).read()
-    for mod in ("import requests", "autotrade import", "from . import autotrade", "mexc", "bybit", "weex", "exchanges", "telegram"): assert mod not in src, mod
+    for mod in ("import requests", "autotrade import", "from . import autotrade", "mexc", "bybit", "weex", "telegram"): assert mod not in src, mod
+    imports = [l for l in src.splitlines() if l.strip().startswith(("import ", "from "))]          # the `exchanges` SETTING is read, the module never
+    assert not any("exchanges" in l or "mexc" in l or "weex" in l or "autotrade" in l for l in imports), imports
 
 
 # =================== t156u: minimum-order bump (cap) + exchange mode ===================
@@ -871,3 +873,88 @@ def test_bump_commands_panel_and_validation():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
     assert "min_bump" in src and "bump_max_risk_usdt" in src and "exchange_modes" in src and "atSet({exchanges:" in src
 
+
+# =================== t158u: sizing modes – $ risk (default) · fixed margin · % of balance ===================
+def test_sizing_defaults_migration_and_commands():
+    db.kv_set(A.KEY, json.dumps(dict(enabled=False, dry_run=True, primary_exchange="mexc", failover=None, ex_on={"mexc": True, "weex": True}, risk_usdt=0.5)))
+    A._S.update(t=0, v=None); s = A.settings(0)
+    assert s["sizing_mode"] == "risk" and s["margin_usdt"] == 1.0 and s["risk_pct"] == 1.0 and s["risk_usdt"] == 0.5 and s["exchanges"] == ["mexc", "weex"]
+    A.tg_command("/autotrade margin 5"); A.tg_command("/autotrade pct 2"); s = A.settings(0)
+    assert s["margin_usdt"] == 5 and s["risk_pct"] == 2 and s["sizing_mode"] == "risk"          # numbers never switch the mode
+    for w, want in (("margin", "margin"), ("pct", "pct"), ("%", "pct"), ("risk", "risk")):
+        A.tg_command("/autotrade sizing " + w); assert A.settings(0)["sizing_mode"] == want
+    assert "⚠️" in A.tg_command("/autotrade sizing kelly")[0] and "⚠️" in A.tg_command("/autotrade pct 50")[0] and "⚠️" in A.tg_command("/autotrade margin 0")[0]
+    for cb in ("margin", "pct", "risk"): A.tg_callback("at:sm:" + cb); assert A.settings(0)["sizing_mode"] == cb
+    t, mk = A.tg_command("/autotrade"); cbs = [b["callback_data"] for row in mk["inline_keyboard"] for b in row]
+    assert {"at:sm:risk", "at:sm:margin", "at:sm:pct"} <= set(cbs) and "$ risk 0.5 USDT" in t and "sizing risk|margin|pct" in t
+    A.tg_command("/autotrade sizing margin"); assert "fixed margin 5 USDT × leverage" in A.panel_text() and "2× the trade's risk" in A.panel_text()
+    A.tg_command("/autotrade sizing pct"); assert "2% of the exchange's available USDT" in A.panel_text()
+    s = A.settings(0); assert s["enabled"] is False and s["dry_run"] is True and s["risk_usdt"] == 0.5
+    v = (lambda: (setattr(A, "prices", lambda q: {}), A.view())[1])(); assert [m["value"] for m in v["sizing_modes"]] == ["risk", "margin", "pct"] and v["sizing_desc"]
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
+    assert "sizing_mode:" in src and "margin_usdt:+$('atmg').value" in src and "risk_pct:+$('atpc').value" in src
+
+def test_fixed_margin_mode_size_and_alert(fresh):
+    enable(sizing_mode="margin", margin_usdt=20, leverage=5); sig(); A.tick(cl=Fake(False), px_fn=PX(100500.0)); r = rows()[0]
+    assert r["status"] == "open_order" and r["vol"] == 10 and abs(r["notional"] - 100) < 1e-9 and abs(r["risk_usdt"] - 1.0) < 1e-9 and r["leverage"] == 5
+    assert json.loads(r["note"])["sizing"] == dict(mode="margin", margin_target=20.0, lev=5)
+    t = [x for x in fresh if "Fixed margin" in x][-1]
+    assert "Fixed margin $20 × 5x → $100.00 position" in t and "risk $1.00 at the stop" in t and "$100.00 position · risk 1.00 USDT" in t
+
+def test_fixed_margin_max_leverage_guard_and_caps(monkeypatch):
+    c = dict(CON["BTC_USDT"]); ad = X.Mexc(Fake())
+    z = A._sized(ad, "BTC_USDT", c, 100000, 99000, "long", dict(A.settings(0), sizing_mode="margin", margin_usdt=10, lev_mode="max"))
+    assert z["leverage"] == 66 and not X.liq_inside(100000, 99000, 66, X.DEFAULT_MMR, "long") and X.liq_inside(100000, 99000, 67, X.DEFAULT_MMR, "long")
+    assert z["vol"] == 66 and abs(z["margin"] - 10) < 1e-9 and abs(z["risk"] - 6.6) < 1e-9      # $10 x 66 = $660 -> 66 ct of $10; risk $6.60 at the 1% stop
+    z = A._sized(ad, "BTC_USDT", c, 100000, 99000, "long", dict(A.settings(0), sizing_mode="margin", margin_usdt=20, leverage=5, max_notional_usdt=50))
+    assert z["vol"] == 5 and abs(z["notional"] - 50) < 1e-9                                    # max position size still caps
+    tiered = dict(c, riskBaseVol=100, riskIncrVol=100, riskIncrImr=0.01, riskIncrMmr=0.0, riskLevelLimit=5, initialMarginRate=0.002)
+    z = A._sized(ad, "BTC_USDT", tiered, 100000, 50000, "long", dict(A.settings(0), sizing_mode="margin", margin_usdt=10, lev_mode="max"))
+    assert z["leverage"] == 1 and z["vol"] == 1 and abs(z["risk"] - 5) < 1e-9                   # 50% stop: guard -> 1x, $10 position
+
+def test_fixed_margin_bump_and_caps(fresh, small):
+    enable(sizing_mode="margin", margin_usdt=0.1, leverage=5, exchanges="mexc"); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01))
+    r = srow(); assert r["status"] == "skipped" and "bump cap" in json.loads(r["note"])["skip"]        # $0.5 position -> 10-ct min risks $1 > 2 x $0.05
+    A.save_settings(dict(bump_max_risk_usdt=2, bump_max_margin_usdt=1)); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01))
+    r = srow(); assert r["status"] == "skipped" and "margin cap $1" in json.loads(r["note"])["skip"]   # bumped margin $2 > $1
+    A.save_settings(dict(bump_max_margin_usdt=0)); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01)); r = srow()
+    assert r["status"] == "open_order" and r["vol"] == 10 and any("Min-order bump" in t and "Fixed margin" in t for t in fresh)
+
+def test_pct_mode_dry_run_needs_readable_balance(monkeypatch, fresh):
+    enable(sizing_mode="pct", risk_pct=1, exchanges="mexc"); sig(); A.tick(cl=Fake(False), px_fn=PX(100500.0)); r = rows()[0]
+    assert r["status"] == "skipped" and "no MEXC API key" in json.loads(r["note"])["skip"] and any("skipped (balance)" in t for t in fresh)
+    monkeypatch.setattr(M, "key_present", lambda: True); fk = Fake()                          # key present: read-only balance call only
+    sig(symbol="SOLUSDT", entry=150, sl=148, tp=156); A.tick(cl=fk, px_fn=PX(150.2)); r = [x for x in rows() if x["symbol"] == "SOLUSDT"][0]
+    assert r["dry"] == 1 and r["status"] == "open_order" and abs(r["risk_usdt"] - 100) < 1e-6 and r["vol"] == 500   # 1% of 10,000 / $2 stop = 50 SOL = 500 ct
+    assert [c[0] for c in fk.calls] == ["usdt_available"] and json.loads(r["note"])["sizing"]["balance"] == 10000.0
+    assert any("1% of MEXC balance $10,000.00 = $100.00 risk" in t for t in fresh)
+    assert json.loads(db.kv_get(A.BAL_KEY))["mexc"]["v"] == 10000.0
+    class NoBal(Fake):
+        def usdt_available(self): raise M.NoPermission(700007, "No permission")
+    with db.conn() as c: c.execute("UPDATE autotrade SET status='cancelled'")
+    sig(symbol="SOLUSDT", entry=150, sl=148, tp=156); A.tick(cl=NoBal(), px_fn=PX(150.2)); r = rows()[-1]
+    assert r["status"] == "skipped" and "can't read the balance" in json.loads(r["note"])["skip"]
+
+def test_pct_mode_next_exchange_and_live_balance_check(monkeypatch, fresh):
+    both_live(monkeypatch, sizing_mode="pct", risk_pct=1)
+    class NoBal(Fake):
+        def usdt_available(self): raise M.NoPermission(700007, "No permission")
+    sig(); fk, fw = NoBal(), FakeWeex(); A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["exchange"] == "weex" and r["status"] == "open_order" and creates(fk) == [] and creates(fw)[0]["quantity"] == "0.1"   # 1% of WEEX 10,000 / 1000
+    assert fw.n("usdt_available") == 1                                                          # read once, reused for the margin check
+    A.save_settings(dict(risk_pct=20, exchanges="mexc", leverage=5)); A.STATE["perm"].clear()
+    class Poor(Fake):
+        def usdt_available(self): self._p("usdt_available"); return 100.0
+    sig(symbol="SOLUSDT", entry=150, sl=148, tp=156); fp = Poor(); A.tick(cl={"mexc": fp}, px_fn=PX(150.2)); r = rows()[-1]
+    assert r["status"] == "skipped" and "not enough USDT margin" in json.loads(r["note"])["skip"] and creates(fp) == []   # $20 risk -> $1,500 / 5x > $100
+
+def test_size_line_in_margin_and_pct_modes():
+    sizing = _sz_reset(); A.save_settings(dict(sizing_mode="margin", margin_usdt=20, leverage=5)); _sz_reset()
+    assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  0.001 BTC · $100.00 position · risk $1.00 · ≤5x → margin ~$20.00"
+    A.save_settings(dict(leverage="max")); _sz_reset(); assert "margin $20 × ~66x est." in sizing.line("BTCUSDT", 100000, 99000)
+    A.save_settings(dict(sizing_mode="pct", risk_pct=1, leverage=5)); _sz_reset()
+    assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  risk 1% of balance (balance not read yet)"
+    db.kv_set(A.BAL_KEY, json.dumps({"mexc": {"v": 1000.0, "t": "x"}})); _sz_reset()
+    assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  0.01 BTC · $1,000.00 position · risk $10.00 (1% of MEXC $1,000.00) · ≤5x → margin ~$200.00"
+    A.save_settings(dict(sizing_mode="risk", risk_usdt=10)); _sz_reset()
+    assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  0.01 BTC · $1,000.00 position · risk $10.00 · ≤5x → margin ~$200.00"
