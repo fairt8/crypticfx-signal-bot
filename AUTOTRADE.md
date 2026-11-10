@@ -17,7 +17,7 @@ Ships OFF: master switch off, no strategies enabled, dry-run on, no key.
 
 ## Controls
 `/autotrade` panel (inline buttons) · `/autotrade off` stops new orders · `/flatten` (confirm) closes every auto position ·
-numbers: `/autotrade risk 2`, `maxopen 3`, `lev 5`, `notional 100`, `dailyloss 20`, `timeout 5|10|15|0`,
+numbers: `/autotrade risk 2`, `maxopen 3`, `lev 5`, `notional 100`, `dailyloss 20`, `cancelpct 70`, `maxwait 24` (hours), `timeout N` (minutes),
 `bumprisk 2`, `bumpmargin 5` · exchanges: `/autotrade exchanges mexc|weex|mexc,weex|weex,mexc` · `/autotrade minbump on|off`.
 Mini App ▸ Auto has the same settings plus open positions, pending limits and PnL (owner-only `/app/api/autotrade`).
 
@@ -119,18 +119,54 @@ WEEX ▸ API Management (https://www.weex.com/account/newapi) ▸ create key wit
 If the MEXC key lacks "View Account Details" (MEXC code 700007), auto-trade shows a note in Telegram (max every 12 h) and
 the Mini App, skips its own margin pre-check, and lets MEXC reject an order if margin is short.
 
-## Leverage MAX, max position size, Limit → Market (t142u)
+## Leverage MAX, max position size (t142u)
 - Leverage: `cap` (≤ N x, `/autotrade lev 5`) or `max` (`/autotrade lev max`): the exchange's highest leverage for the coin
   AND the order's size tier (MEXC contract risk tiers by volume; WEEX /capi/v3/market/riskLimits notional brackets). In both
   modes a guard steps leverage down 1x at a time while the estimated isolated liquidation price
   (entry × (1 ∓ 1/lev ± maintenance-margin rate)) is at or inside the stop; this is logged and saved in the row note. Size is
   always risk ÷ stop distance; leverage only changes the margin used.
 - "Max position size (USDT)" (formerly "max notional"; `/autotrade size 100`, 0 = off) caps qty × price per trade.
-- Order types: Limit · Limit → Market · Market. Limit → Market places the limit at entry; at the 5/10/15-min timeout it is
-  cancelled and re-entered at market on the SAME exchange only if the signal is still valid and price is within 0.5R of the
-  entry (not beyond SL/TP), re-sized at the live price; otherwise it is skipped. A partial fill before the cancel is kept.
+- Order types: see "Entry type follows the signal" below (the Limit → Market type was removed on 2026-11-10).
 
 ## 📐 Size line on crypto signal alerts (t144u)
 `app/sizing.py` appends one line ("📐 Size  qty BASE · $position · risk $ · leverage/margin") to every crypto signal alert and
 DON20/DON28 entry, from the same sizing settings, even when auto-trade is off. Additive only: no other alert content,
 signal generation or timing changes, and the line is omitted on any failure. `/autotrade sizeline on|off` (default on).
+
+## Entry type follows the signal; limits never become market orders (t160u, 2026-11-10)
+User rules: "if the limit orders does not fills don't use market order, only use market order if the order/signal is
+market order" and "Limit orders cancel once it is not filled and the trade has reached 70% proposed profit already".
+
+Entry type per strategy (`ENTRY_TYPE` in `app/autotrade.py`, from how each strategy enters in the bot itself):
+
+| Strategy | Entry | Why |
+|---|---|---|
+| FVG-D1, FVG-PLAN, FVG+TREND (and FVG) | **limit** | entry at the 15m/5m FVG edge, away from price; the signal is saved `pending` and the tracker fills it only when price comes back |
+| DON20, DON28 | **market** | daily Donchian breakout entered at the live price when the position opens |
+| BRK, PAT-WEDGE, PAT-TRIPLE crypto | **market** | 4H breakout / pattern entered at the 4H close (signal saved `open`, filled at creation) |
+| CHK | **market** | 1H checklist entry at the 1H close (saved `open`) |
+
+Any strategy not in the map is treated as limit (it never chases price).
+
+Order type setting `order_type`:
+- `auto` = **Follow the signal** (default and live): limit-entry signals get a limit at the entry only; market-entry
+  signals get a market order, skipped if price already moved more than 0.5R from the signal entry (drift check).
+- `limit` = **Limit only** (manual): every signal, market-entry ones too, gets a limit at its entry. Never a market order.
+- The old `market` and `limit_market` (Limit → Market) types are gone. Saved settings, `/autotrade market`,
+  `/autotrade limit_market` and old panel buttons all map to `auto`. Live: `limit_market` → `auto`.
+
+When an unfilled limit is cancelled (checked every monitor tick, `AUTOTRADE_POLL_S`, 60 s), in this order:
+1. Price hits the stop before the fill → cancelled (signal invalidated).
+2. Price moved at least `cancel_pct` (default **70%**) of the distance from the entry to the target in the trade's
+   direction without filling → cancelled, alert "limit cancelled, price reached 70% of target without fill". The target is
+   TP1 (1.5R) for the 50%-at-TP1 strategies (CHK, FVG-D1), else the signal's TP. With no target (DON) this rule doesn't apply.
+   A new limit isn't placed at all if price is already past that point.
+3. Max wait (`limit_timeout_min`, safety net, default **24 h**; 0 = off) → "limit not filled, cancelled".
+4. The bot's own signal ends first (expired / closed / retired) → cancelled.
+Never converted to market. A partial fill is kept as the position (size and $ risk scaled to the filled part, exits
+managed as usual) and the unfilled rest is cancelled: "limit partly filled, rest cancelled".
+The old 5/10/15-min windows are no longer the default: a saved 5/10/15 (or no value) migrates once to 24 h (flag
+`wait_v2`); any wait set after that is kept. Commands: `/autotrade auto` · `/autotrade limit` · `/autotrade cancelpct N`
+(10–100) · `/autotrade maxwait H` (hours, 0 = off) · `/autotrade timeout N` (minutes, 0–10080). Telegram panel: Follow
+the signal / Limit only and max-wait buttons; Mini App ▸ Auto ▸ Settings: order type, cancel % field (saved with "Save
+numbers"), max-wait chips; each strategy chip shows limit / market.

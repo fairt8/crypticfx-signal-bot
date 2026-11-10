@@ -9,7 +9,10 @@ try/except, and only READS the signals / don20 / don28 tables. Its own writes go
 Flow (every AUTOTRADE_POLL_S, default 60 s, leader instance only):
   new signal of an enabled crypto strategy (created after auto-trade / that strategy was switched on, <= 30 min old)
     -> size = risk USDT / stop distance (MEXC contract size, step, min qty, tick; optional max notional; leverage cap)
-    -> limit at the signal entry (optional 5/10/15-min unfilled timeout) or market, isolated, SL/TP attached to the order
+    -> order type follows the signal's entry type (ENTRY_TYPE): limit-entry signals = limit at the entry only (cancelled
+       when price reaches cancel_pct (70%) of the way to the target or hits the stop without a fill, or at the optional max
+       wait; never converted to market); market-entry signals = market (drift check);
+       isolated, SL/TP attached to the order
   then mirrors the bot's tracked trade: FVG+TREND final stop/target at fill, DON20/DON28 trailing stop (SL amended),
   CHK/FVG-D1 50% at TP1 + stop to entry, and a reduce-only close when the tracked trade closes. Unfilled limits are
   cancelled at the timeout or when the signal invalidates first.
@@ -29,17 +32,18 @@ from . import db, mexc as M, weex as W, exchanges as X
 
 STRATS = ["DON20", "DON28", "BRK", "PAT-WEDGE", "CHK", "FVG-D1", "FVG-PLAN", "PAT-TRIPLE-C", "FVG+TREND"]   # crypto only; forex excluded
 DON = ("DON20", "DON28")
-TIMEOUTS = (0, 5, 10, 15)          # minutes; 0 = no timeout (cancel only when the signal invalidates)
+TIMEOUTS = (0, 60, 240, 720, 1440)   # max wait for an unfilled limit (safety net, minutes; 0 = off). Any 0..10080 is accepted.
+MAX_WAIT_MAX = 10080                 # 7 days
 ACTIVE = ("placing", "open_order", "filled")
 SIG_DONE = ("tp", "sl", "be", "retired", "expired", "cancelled", "filtered")
 KEY = "autotrade:settings"
 POLL_S = int(os.getenv("AUTOTRADE_POLL_S", "60"))
 MAX_AGE_MIN = int(os.getenv("AUTOTRADE_MAX_AGE_MIN", "30"))     # don't enter signals older than this
-MAX_SLIP_R = float(os.getenv("AUTOTRADE_MAX_SLIP_R", "0.5"))    # market entry skipped if price moved more than this (R) from entry
+MAX_SLIP_R = float(os.getenv("AUTOTRADE_MAX_SLIP_R", "0.5"))    # market-entry signal skipped if price moved more than this (R) from the signal entry
 MAX_PX_DEV = float(os.getenv("AUTOTRADE_MAX_PX_DEV", "0.02"))   # MEXC vs Binance price sanity (catches renamed / 1000x contracts)
 FEE = float(os.getenv("AUTOTRADE_FEE", "0.0005"))               # MEXC API futures taker fee per side (announcement 2026-03-30)
-DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="limit",
-                limit_timeout_min=15, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
+DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="auto",
+                limit_timeout_min=1440, cancel_pct=70.0, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
                 exchanges=["mexc", "weex"], lev_mode="cap", size_line=True,
                 min_bump=True, bump_max_risk_usdt=0.0, bump_max_margin_usdt=0.0,
                 sizing_mode="risk", margin_usdt=1.0, risk_pct=1.0)   # sizing: risk ($ risk_usdt) | margin (margin_usdt x leverage) | pct (risk_pct % of balance at the stop)
@@ -49,8 +53,31 @@ BAL_KEY = "autotrade:balance"   # last available-USDT read per exchange (for the
 EX_MODES = (("mexc",), ("weex",), ("mexc", "weex"), ("weex", "mexc"))
 EX_MODE_LABEL = {("mexc",): "MEXC only", ("weex",): "WEEX only", ("mexc", "weex"): "MEXC → WEEX", ("weex", "mexc"): "WEEX → MEXC"}
 LEGACY_EX = ("primary_exchange", "failover", "ex_on")   # pre-2026-11-10 exchange settings, migrated to `exchanges` on load
-ORDER_TYPES = ("limit", "market", "limit_market")   # limit_market: limit at entry; at the timeout -> market if still <= 0.5R away and valid
-OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}
+# Order type (user 2026-11-10, t160u): "auto" = follow the signal (limit-entry signal -> limit only, cancelled if unfilled at the
+# timeout, NEVER converted to market; market-entry signal -> market with the drift check). "limit" = limit at the signal
+# entry for every signal (manual, never market). The old "market" / "limit_market" (Limit -> Market) types were removed
+# and migrate to "auto".
+ORDER_TYPES = ("auto", "limit")
+OT_LABEL = {"auto": "Follow the signal", "limit": "Limit only"}
+LEGACY_OT = {"limit_market": "auto", "limitmarket": "auto", "market": "auto"}
+# Entry type per strategy (how the bot itself enters): "limit" = entry price away from the market, filled later when price
+# comes back (signal saved 'pending'; FVG family: entry at the 15m/5m FVG edge); "market" = entered now at the candle
+# close / breakout (signal saved 'open' + filled_at at creation; DON entries at the live price).
+ENTRY_TYPE = {"FVG-D1": "limit", "FVG-PLAN": "limit", "FVG+TREND": "limit", "FVG": "limit",
+              "DON20": "market", "DON28": "market", "BRK": "market", "PAT-WEDGE": "market", "PAT-TRIPLE-C": "market", "CHK": "market"}
+def entry_type(strategy): return ENTRY_TYPE.get(strategy, "limit")   # unknown -> limit (never chases price)
+def target_of(strategy, entry, sl, tp):
+    """The target the 70% cancel rule measures against: TP1 (1.5R) for 50%-at-TP1 strategies (CHK / FVG-D1), else the
+    signal's TP; None when there is none (DON trailing stop)."""
+    from . import config as C
+    if not tp: return None
+    entry, sl, tp = float(entry), float(sl), float(tp); Rd = abs(entry - sl)
+    if strategy in C.PTP_STRATS and Rd and abs(tp - entry) > 1.5 * Rd + 1e-12: return entry + (1 if tp > entry else -1) * 1.5 * Rd
+    return tp
+def progress(direction, entry, target, p):
+    """Share of the entry -> target distance the price has moved in the trade's direction (can be < 0 or > 1)."""
+    if target is None or p is None or float(target) == float(entry): return None
+    return (float(p) - float(entry)) / (float(target) - float(entry))
 STATE = dict(last_tick=None, last_result=None, errors=collections.deque(maxlen=30), skips=collections.deque(maxlen=30), backoff_until=0, idle_until=0, perm={})
 PERM_NOTE = {"mexc": ("MEXC key can't read the account balance (code 700007). In MEXC ▸ API Management edit this key and also tick "
                       "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short."),
@@ -139,6 +166,10 @@ def migrate(raw):
     elif any(k in raw for k in LEGACY_EX): ex = legacy_exchanges(raw)
     else: ex = list(DEFAULTS["exchanges"])
     for k in LEGACY_EX: raw.pop(k, None)
+    if not raw.get("wait_v2"):   # t160u: the 5/10/15-min window is no longer the default cancel -> 24 h max wait (70% rule cancels first)
+        if raw.get("limit_timeout_min") in (None, 5, 10, 15): raw["limit_timeout_min"] = DEFAULTS["limit_timeout_min"]
+        raw["wait_v2"] = True
+    if raw.get("order_type") not in ORDER_TYPES: raw["order_type"] = LEGACY_OT.get(raw.get("order_type"), "auto")   # Limit -> Market / Market -> auto
     v = dict(DEFAULTS, **raw); v["exchanges"] = ex
     return v
 def _num(x, lo, hi, name, kind=float):
@@ -197,16 +228,14 @@ def validate(patch, cur):
             s[k] = v
         elif k == "size_line": s[k] = bool(v)
         elif k == "order_type":
-            if v not in ORDER_TYPES: raise ValueError("order type must be limit, market or limit_market")
+            v = LEGACY_OT.get(v, v)
+            if v not in ORDER_TYPES: raise ValueError("order type must be auto (follow the signal) or limit")
             s[k] = v
-        elif k == "limit_timeout_min":
-            v = _num(v, 0, 15, "Limit timeout", int)
-            if v not in TIMEOUTS: raise ValueError("limit timeout must be 5, 10, 15 or 0 (none)")
-            s[k] = v
+        elif k == "cancel_pct": s[k] = round(_num(v, 10, 100, "Cancel an unfilled limit when price reached this % of the way to the target"), 2)
+        elif k == "limit_timeout_min": s[k] = _num(v, 0, MAX_WAIT_MAX, "Max wait for an unfilled limit (minutes, 0 = off)", int); s["wait_v2"] = True
         elif k == "max_notional_usdt": s[k] = round(_num(v, 0, 10000000, "Max notional (USDT)"), 2)
         elif k == "daily_loss_usdt": s[k] = round(_num(v, 0, 10000000, "Daily loss limit (USDT)"), 2)
         else: raise ValueError(f"unknown setting: {k}")
-    if s.get("order_type") == "limit_market" and not s.get("limit_timeout_min"): s["limit_timeout_min"] = 15   # needs a timeout to switch to market
     if not s.get("salt"): s["salt"] = secrets.token_hex(2)
     s["updated_at"] = now; return s
 def save_settings(patch):
@@ -357,29 +386,29 @@ def manage(ctx, r, src, s):
             _upd(r["id"], status="filled", filled_at=iso(now), fill_price=fill[0], vol=fill[1], qty=fill[1] * cs)
             ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'} · ${fill[1] * cs * fill[0]:,.2f} position · risk {float(r['risk_usdt'] or 0):.2f} USDT\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing") + bump_line(_bump_of(r))); return
         reason = None; timed_out = False
-        try: nt = json.loads(r.get("note") or "{}"); to = int(nt.get("timeout", 0)); conv = bool(nt.get("then_market"))
-        except Exception: to, conv = 0, False
-        if to and now - _ts(r["created_at"]) >= timedelta(minutes=to): reason = f"not filled in {to} min"; timed_out = True
+        try: to = int(json.loads(r.get("note") or "{}").get("timeout", 0))   # an old 'then_market' flag is ignored: never market
+        except Exception: to = 0
+        cp = float(s.get("cancel_pct") or 70); tgt = target_of(r["strategy"], r["entry"], r["init_sl"] or r["sl"], r["tp"]); pr = progress(r["direction"], r["entry"], tgt, p)
+        hit70 = False
+        if p is not None and ((p <= r["sl"]) if long else (p >= r["sl"])): reason = "price hit the stop before fill (signal invalidated)"
+        elif pr is not None and pr >= cp / 100 - 1e-12: reason = f"price reached {cp:g}% of target without fill ({pr*100:.0f}% of the way to {_fmt(tgt)})"; hit70 = True
+        elif to and now - _ts(r["created_at"]) >= timedelta(minutes=to): reason = f"not filled within the max wait ({_wait_txt(to)})"; timed_out = True
         elif src is None: reason = "signal no longer tracked"
         elif don and src.get("status") != "open": reason = "DON position closed before fill"
         elif not don and src.get("status") in SIG_DONE: reason = f"signal {src.get('status')}"
-        elif p is not None and ((p <= r["sl"]) if long else (p >= r["sl"])): reason = "price hit the stop before fill"
         if reason:
             if live:
                 ad.cancel(r["contract"], r["ext_oid"])
                 o = ad.order(r["contract"], r["ext_oid"]) or {}
-                if float(o.get("filled") or 0) > 0:   # filled in the race: keep the filled part as the position
-                    cs = (r["qty"] / r["vol"]) if r["vol"] else 0; dv = float(o["filled"])
-                    _upd(r["id"], status="filled", filled_at=iso(now), fill_price=float(o.get("avg") or r["entry"]), vol=dv, qty=dv * cs)
-                    ctx.msg(r, _hdr(r, "✅", "partly filled before cancel") + f"\n{dv:g} filled"); return
-            if timed_out and conv:   # Limit → Market
-                ok, why_not = _market_ok(r, src, p, don)
-                if ok:
-                    try: _to_market(ctx, r, p, s, to); return
-                    except M.Skip as x: why_not = str(x)   # e.g. minimum order above the bump cap at the live price
-                reason += f"; no market entry: {why_not}"
+                if float(o.get("filled") or 0) > 0:   # partial fill: keep the filled part (exits managed), the rest is cancelled
+                    cs = (r["qty"] / r["vol"]) if r["vol"] else 0; dv = float(o["filled"]); fr = dv / float(r["vol"]) if r["vol"] else 1
+                    fp = float(o.get("avg") or r["entry"]); rk = round(float(r["risk_usdt"] or 0) * fr, 4)
+                    _upd(r["id"], status="filled", filled_at=iso(now), fill_price=fp, vol=dv, qty=dv * cs, risk_usdt=rk, notional=round(dv * cs * fp, 4))
+                    ctx.msg(r, _hdr(r, "✅", "limit partly filled, rest cancelled") + f"\n📍 {_fmt(fp)} · {dv:g} of {float(r['vol']):g} filled · ${dv * cs * fp:,.2f} position · risk {rk:.2f} USDT"
+                            f"\n<i>{reason}; the unfilled rest was cancelled (never sent at market). Exits are managed for the filled part.</i>"); return
             _upd(r["id"], status="cancelled", closed_at=iso(now), exit_reason=reason)
-            ctx.msg(r, _hdr(r, "⌛", "limit cancelled") + f"\n<i>{reason}</i>")
+            what = f"limit cancelled, price reached {cp:g}% of target without fill" if hit70 else "limit not filled, cancelled" if timed_out else "limit cancelled"
+            ctx.msg(r, _hdr(r, "⌛", what) + f"\n<i>{reason}; never sent at market</i>")
         return
     if r["status"] != "filled": return
     # 1) the bot's tracked trade closed -> close ours (reduce-only)
@@ -527,45 +556,9 @@ def _bump_of(r):
     try: return json.loads(r.get("note") or "{}").get("bump")
     except Exception: return None
 
-def _market_ok(r, src, p, don):
-    """Limit → Market at the timeout: signal still valid and price within MAX_SLIP_R (0.5R) of the entry, not beyond SL/TP."""
-    if src is None: return False, "signal no longer tracked"
-    if don and src.get("status") != "open": return False, "DON position closed"
-    if not don and src.get("status") in SIG_DONE: return False, f"signal {src.get('status')}"
-    if p is None: return False, "no live price"
-    long = r["direction"] == "long"; R = abs(float(r["entry"]) - float(r["init_sl"] or r["sl"]))
-    if (p <= r["sl"]) if long else (p >= r["sl"]): return False, "price beyond the stop"
-    if r["tp"] and ((p >= r["tp"]) if long else (p <= r["tp"])): return False, "price beyond the target"
-    if R and abs(p - float(r["entry"])) > MAX_SLIP_R * R + 1e-12: return False, f"price {abs(p - float(r['entry']))/R:.2f}R from the entry (max {MAX_SLIP_R:g}R)"
-    return True, None
-
-def _to_market(ctx, r, p, s, to):
-    """Unfilled limit (already cancelled) -> market entry on the SAME exchange, re-sized at the live price."""
-    now = ctx.now; live = not r["dry"]; ex = exof(r); ad = ctx.ad(ex); con = r["contract"]
-    c = ad.instrument(con); bal = None
-    if (s.get("sizing_mode") or "risk") == "pct":
-        try: bal = _balance(ctx, ad, s)
-        except M.Skip: raise
-        except Exception as x: raise M.NoBalance(f"% of balance sizing: {ad.label} balance read failed ({X.short(x)[:100]})")
-    z = _sized(ad, con, c, p, float(r["init_sl"] or r["sl"]), r["direction"], s, bal)
-    ext = (r["ext_oid"] + "m")[:32 if ex == "mexc" else 36]; e = M.round_price(p, c)
-    upd = dict(order_type="market", entry=e, vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"],
-               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"), sizing=z.get("sizing"), **({"bump": z["bump"]} if z.get("bump") else {}))))
-    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · ${z['notional']:,.2f} position · risk {z['risk']:.2f} USDT" + sizing_line(z) + bump_line(z.get("bump"))
-    if not live:
-        _upd(r["id"], status="filled", filled_at=iso(now), fill_price=e, **upd); ctx.msg(r, head); return
-    _upd(r["id"], status="placing", **upd)
-    try:
-        oid = ad.place_open(con, r["direction"], z["vol"], e, True, z["leverage"], r["sl"], r["tp"], ext)
-        _upd(r["id"], status="open_order", order_id=oid); ctx.msg(r, head)
-    except (M.RateLimited, W.RateLimited): raise
-    except Exception as x:
-        if X.kind(x) is None and isinstance(x, (M.MexcError, W.WeexError)):
-            _upd(r["id"], status="error", closed_at=iso(now), note=json.dumps(dict(error=f"market entry rejected {x.code}: {x.msg}"[:200])))
-            ctx.msg(r, _hdr(r, "⚠️", "market entry rejected") + f"\n<code>{x.code}</code> {str(x.msg)[:150]}")
-        else:   # unknown: stays 'placing', resolved by client order id (or error after 5 min)
-            _err(f"market entry {con} on {ad.label}", x)
-
+def _wait_txt(m):
+    m = int(m or 0)
+    return "off" if not m else f"{m // 60:g} h" if m % 60 == 0 else f"{m} min"
 def _perm(ctx, ex, s):
     """Remember + (max every 12 h, live only) tell the user that the key lacks the balance permission."""
     STATE["perm"][ex] = PERM_NOTE.get(ex, f"{X.LABEL.get(ex, ex)} key lacks a permission")
@@ -610,8 +603,8 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     if p is None: raise M.Skip("no live price")
     if (p <= sl) if long else (p >= sl): raise M.Skip("price already beyond the stop")
     if tp and ((p >= tp) if long else (p <= tp)): raise M.Skip("price already beyond the target")
-    market = s["order_type"] == "market"
-    if market and R and abs(p - entry) > MAX_SLIP_R * R: raise M.Skip(f"price moved {abs(p-entry)/R:.2f}R from the entry")
+    et = entry_type(cnd["strategy"]); market = et == "market" and (s.get("order_type") or "auto") == "auto"   # limit-entry -> limit only
+    if market and R and abs(p - entry) > MAX_SLIP_R * R: raise M.Skip(f"price moved {abs(p-entry)/R:.2f}R from the entry (market-entry signal, max {MAX_SLIP_R:g}R)")
     ref = p if market else entry; bal = None
     if (s.get("sizing_mode") or "risk") == "pct":
         try: bal = _balance(ctx, ad, s)
@@ -638,12 +631,15 @@ def _open_on(ctx, s, cnd, ad, rid, why):
             raise
     tag = "s" if cnd["source"] == "sig" else cnd["source"][-2:]
     ext = ad.client_id(s.get("salt"), tag, cnd["ref_id"])
-    to = 0 if market else int(s.get("limit_timeout_min") or 0); conv = s["order_type"] == "limit_market"
+    to = 0 if market else int(s.get("limit_timeout_min") or 0)
+    if not market:
+        cp = float(s.get("cancel_pct") or 70); pr = progress(cnd["direction"], entry, target_of(cnd["strategy"], entry, sl, tp), p)
+        if pr is not None and pr >= cp / 100 - 1e-12: raise M.Skip(f"price already {pr*100:.0f}% of the way to the target (limit cancel rule {cp:g}%)")
     via = f" via {ad.label} (backup)" if why else ""
     row = dict(strategy=cnd["strategy"], symbol=cnd["symbol"], contract=con, direction=cnd["direction"], exchange=ex,
-               order_type="market" if market else s["order_type"], entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
+               order_type="market" if market else "limit", entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
                init_sl=float(sl), vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"], ext_oid=ext,
-               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), sizing=z.get("sizing"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}), **({"bump": z["bump"]} if z.get("bump") else {}))))
+               dry=0 if live else 1, note=json.dumps(dict(timeout=to, entry_type=et, lev=z.get("lev_info"), sizing=z.get("sizing"), **({"failover": "; ".join(why)[:200]} if why else {}), **({"bump": z["bump"]} if z.get("bump") else {}))))
     full = dict(row, source=cnd["source"], ref_id=cnd["ref_id"])
     fo_line = (("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else "") + sizing_line(z) + bump_line(z.get("bump"), ex)
     if not live:   # dry-run: no private call; market fills at the live price now, limit waits for the fill
@@ -819,7 +815,8 @@ def view():
     pub["exchanges"] = exchanges_of(s); pub["primary_exchange"] = pub["exchanges"][0]   # primary_exchange: read-only, for old Mini App builds
     return dict(settings=pub, key_present=M.key_present(), exchanges=exs, failover=failover_on(s), exchange_mode=",".join(exchanges_of(s)), exchange_mode_label=mode_label(s),
                 exchange_modes=[dict(value=",".join(m), label=EX_MODE_LABEL[m]) for m in EX_MODES], bump_cap_risk=round(bump_cap(s), 4) if bump_cap(s) is not None else None, bump_cap_text=bump_cap_txt(s),
-                sizing_modes=[dict(value=k, label=SIZING_LABEL[k]) for k in SIZING], sizing_desc=sizing_desc(s), balances=_bal_cache(), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"]) for k in STRATS],
+                sizing_modes=[dict(value=k, label=SIZING_LABEL[k]) for k in SIZING], sizing_desc=sizing_desc(s), balances=_bal_cache(), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"], entry=entry_type(k)) for k in STRATS],
+                order_types=[dict(value=k, label=OT_LABEL[k]) for k in ORDER_TYPES],
                 timeouts=list(TIMEOUTS), active=act, recent=[r for r in rows if r["status"] not in ACTIVE][:60], live=summ(False), dry=summ(True),
                 worker=dict(last_tick=STATE["last_tick"], last_result=STATE["last_result"], poll_s=POLL_S, errors=list(STATE["errors"])[-8:], skips=list(STATE["skips"])[-10:]),
                 exchange=dict(name=" → ".join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or "none", base=M.BASE,
@@ -836,9 +833,10 @@ def panel_text():
     try: v = view()
     except Exception as e: _err("panel view", e)
     st = "🟢 <b>ON</b>" if s["enabled"] else "🔴 <b>OFF</b>"; md = "🧪 dry-run (no real orders)" if s["dry_run"] else "💸 <b>LIVE</b> (real orders)"
-    ot = ("market" if s["order_type"] == "market" else
-          f"limit at entry · market at {s['limit_timeout_min']} min if still ≤{MAX_SLIP_R:g}R away" if s["order_type"] == "limit_market" else
-          "limit at entry · " + (f"cancel if not filled in {s['limit_timeout_min']} min" if s["limit_timeout_min"] else "no timeout"))
+    tmo = (f"cancelled if price reaches {float(s.get('cancel_pct') or 70):g}% of the way to the target or hits the stop before the fill"
+           f" · max wait {_wait_txt(s['limit_timeout_min'])}")
+    ot = (f"limit only for every signal · {tmo} · never market" if s.get("order_type") == "limit" else
+          f"follow the signal · limit-entry signals: limit at entry, {tmo}, never market · market-entry signals: market (skipped if price moved > {MAX_SLIP_R:g}R)")
     lv = "MAX per coin (liq. kept beyond the stop)" if s.get("lev_mode") == "max" else f"≤ {s['leverage']}x"
     exl = exchanges_of(s)
     def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · not used")
@@ -861,6 +859,7 @@ def panel_text():
     for n, note in STATE["perm"].items(): L.append("⚠️ " + esc(note))
     L += ["", "<i>Signals and alerts are never paused or changed by auto-trade. Each trade stays on the exchange it was opened on.</i>",
           "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> or <code>lev max</code> · <code>size 100</code> (max position size) · <code>dailyloss 20</code> (0 = off) · <code>sizeline on|off</code>",
+          "Orders: <code>/autotrade auto</code> (follow the signal) · <code>limit</code> · <code>cancelpct 70</code> (cancel an unfilled limit at N% of the way to the target) · <code>maxwait 24</code> (hours, 0 = off)",
           "Sizing: <code>/autotrade sizing risk|margin|pct</code> · <code>margin 5</code> (USDT margin per trade) · <code>pct 1</code> (% of balance risked at the stop) – setting a number never switches the mode",
           "Exchanges: <code>/autotrade exchanges mexc</code> · <code>weex</code> · <code>mexc,weex</code> · <code>weex,mexc</code>",
           "Min-order bump: <code>/autotrade minbump on|off</code> · <code>bumprisk 2</code> (max $ risk when bumped, 0 = auto 2× risk) · <code>bumpmargin 5</code> (max $ margin when bumped, 0 = off)"]
@@ -870,10 +869,10 @@ def panel_markup():
     rows = [[B("🔴 Turn OFF" if s["enabled"] else "🟢 Turn ON", "at:en"), B("💸 Go LIVE…" if s["dry_run"] else "🧪 Back to dry-run", "at:dr")]]
     ks = [B(("✅ " if k in s["strategies"] else "⬜ ") + k, "at:s:" + k) for k in STRATS]
     rows += [ks[i:i+3] for i in range(0, len(ks), 3)]
-    rows.append([B(("● " if s["order_type"] == k else "") + OT_LABEL[k], "at:ot:" + k) for k in ORDER_TYPES])
+    rows.append([B(("● " if (s.get("order_type") or "auto") == k else "") + OT_LABEL[k], "at:ot:" + k) for k in ORDER_TYPES])
     rows.append([B(("● " if s.get("lev_mode") != "max" else "") + f"Lev ≤{s['leverage']}x", "at:lv:cap"), B(("● " if s.get("lev_mode") == "max" else "") + "Lev MAX", "at:lv:max"),
                  B(("✅" if s.get("size_line", True) else "⬜") + " Size line", "at:sz")])
-    rows.append([B(("● " if s["limit_timeout_min"] == t else "") + (f"{t} min" if t else "No timeout"), f"at:to:{t}") for t in (5, 10, 15, 0)])
+    rows.append([B(("● " if s["limit_timeout_min"] == t else "") + ("Max wait " + _wait_txt(t) if t else "No max wait"), f"at:to:{t}") for t in (240, 1440, 0)])
     cur = tuple(exchanges_of(s))
     em = [B(("● " if cur == m else "") + EX_MODE_LABEL[m], "at:em:" + ",".join(m)) for m in EX_MODES]
     rows += [em[:2], em[2:]]
@@ -883,7 +882,7 @@ def panel_markup():
     rows.append([B("🛑 Flatten all…", "at:fl"), B("↻ Refresh", "at:rf")])
     return {"inline_keyboard": rows}
 NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt", "size": "max_notional_usdt",
-       "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min",
+       "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min", "cancelpct": "cancel_pct",
        "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt", "margin": "margin_usdt", "pct": "risk_pct"}
 def tg_command(text):
     """/autotrade [on|off|risk N|maxopen N|lev N|notional N|dailyloss N|timeout N] -> (reply text, markup or None)."""
@@ -893,7 +892,15 @@ def tg_command(text):
             w = a[0].lower()
             if w in ("on", "off"): save_settings(dict(enabled=w == "on"))
             elif w in NUM and len(a) > 1: save_settings({NUM[w]: a[1]})
-            elif w in ("limit", "market", "limit_market", "limitmarket"): save_settings(dict(order_type="limit_market" if w.startswith("limit") and w != "limit" else w))
+            elif w == "maxwait" and len(a) > 1:   # hours (e.g. 24, 24h) or 0 = off
+                h = a[1].lower().rstrip("h")
+                try: save_settings(dict(limit_timeout_min=int(round(float(h) * 60))))
+                except (TypeError, ValueError) as e: raise ValueError(str(e) if "Max wait" in str(e) else "max wait must be hours, e.g. 24 (0 = off)")
+            elif w in ("auto", "follow", "signal", "limit"): save_settings(dict(order_type="limit" if w == "limit" else "auto"))
+            elif w in ("market", "limit_market", "limitmarket"):
+                save_settings(dict(order_type="auto"))
+                return ("ℹ️ Forced market and Limit → Market were removed: limit-entry signals stay limit (cancelled at 70% to target / stop / max wait, never market), "
+                        "market-entry signals go market. Order type is now <b>Follow the signal</b>.\n\n" + panel_text()), panel_markup()
             elif w == "sizeline" and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(size_line=a[1].lower() == "on"))
             elif w in ("exchanges", "exchange", "ex") and len(a) > 1: save_settings(dict(exchanges=",".join(a[1:])))
             elif w in ("sizing", "sizingmode", "mode") and len(a) > 1:
@@ -903,7 +910,7 @@ def tg_command(text):
             elif w == "primary" and len(a) > 1: save_settings(dict(primary_exchange=a[1].lower()))
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
-            else: return ("Usage: /autotrade [on|off|limit|market|limit_market|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
+            else: return ("Usage: /autotrade [on|off|auto|limit|cancelpct N|maxwait H|timeout MIN|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
                           "sizing risk|margin|pct|margin N|pct N|exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
@@ -935,8 +942,8 @@ def tg_callback(data):
     except ValueError as e: return str(e)[:190], None, None, None
     if d.startswith("lv:"): save_settings(dict(lev_mode=d[3:])); return "Leverage: " + ("MAX" if d[3:] == "max" else f"≤{s['leverage']}x"), panel_text(), panel_markup(), None
     if d == "sz": s = save_settings(dict(size_line=not s.get("size_line", True))); return "Size line " + ("ON" if s["size_line"] else "OFF"), panel_text(), panel_markup(), None
-    if d.startswith("ot:"): save_settings(dict(order_type=d[3:])); return "Order type: " + d[3:], panel_text(), panel_markup(), None
-    if d.startswith("to:"): save_settings(dict(limit_timeout_min=int(d[3:]))); return "Limit timeout set", panel_text(), panel_markup(), None
+    if d.startswith("ot:"): s = save_settings(dict(order_type=d[3:])); return "Order type: " + OT_LABEL[s["order_type"]], panel_text(), panel_markup(), None
+    if d.startswith("to:"): s = save_settings(dict(limit_timeout_min=int(d[3:]))); return "Max wait: " + _wait_txt(s["limit_timeout_min"]), panel_text(), panel_markup(), None
     if d == "fl":
         return "Confirm below", None, None, ("🛑 <b>Flatten all auto trades?</b> Turns auto-trade OFF, cancels pending auto limits and market-closes every auto position on the exchange it was opened on. Manual positions are not touched.",
                                              {"inline_keyboard": [[{"text": "🛑 Yes, flatten all", "callback_data": "at:flx"}, {"text": "Cancel", "callback_data": "at:no"}]]})

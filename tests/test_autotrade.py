@@ -61,6 +61,7 @@ def sig(symbol="BTCUSDT", strategy="BRK", direction="long", entry=100000.0, sl=9
     return db.insert(s)
 def rows(): return A._q("SELECT * FROM autotrade ORDER BY id")
 def enable(**kw):
+    """Older tests run in the manual "Limit only" order type with a 15-min max wait; t160u tests pass order_type="auto"."""
     p = dict(enabled=True, strategies=["BRK"], risk_usdt=10, max_open=3, leverage=5, order_type="limit", limit_timeout_min=15); p.update(kw)
     return A.save_settings(p)
 PX = lambda v: (lambda syms: {s: v for s in syms})
@@ -111,7 +112,7 @@ def test_error_and_rate_limit_parsing():
 def test_settings_validation():
     with pytest.raises(ValueError): A.save_settings(dict(dry_run=False))          # no key -> live refused
     with pytest.raises(ValueError): A.save_settings(dict(strategies=["MF-REJ"]))  # forex not allowed
-    with pytest.raises(ValueError): A.save_settings(dict(limit_timeout_min=7))
+    with pytest.raises(ValueError): A.save_settings(dict(limit_timeout_min=99999))
     with pytest.raises(ValueError): A.save_settings(dict(risk_usdt=-1))
     s = A.settings(max_age=0); assert s["enabled"] is False and s["dry_run"] is True and s["strategies"] == []   # deploy defaults: OFF
     s = enable(); assert s["enabled"] and s["enabled_at"] and s["dry_run"]
@@ -187,16 +188,16 @@ def test_live_rejection_recorded(monkeypatch, fresh):
     A.tick(cl=fk, px_fn=PX(100500.0)); assert fk.n("create_order") == 1
 
 def test_live_fill_exit_mirror_and_price_sanity(monkeypatch):
-    live(monkeypatch, order_type="market", strategies=["BRK", "FVG+TREND"]); fk = Fake(); fk.fair["BTC_USDT"] = 130000.0
+    live(monkeypatch, order_type="auto", strategies=["BRK", "PAT-WEDGE"]); fk = Fake(); fk.fair["BTC_USDT"] = 130000.0
     sig(status="open"); A.tick(cl=fk, px_fn=PX(100100.0))
     assert rows()[0]["status"] == "skipped" and "differs" in json.loads(rows()[0]["note"])["skip"]   # MEXC price far from Binance
-    fk.fair.clear(); i = sig(symbol="SOLUSDT", strategy="FVG+TREND", entry=150, sl=148, tp=156, status="open")
+    fk.fair.clear(); i = sig(symbol="SOLUSDT", strategy="PAT-WEDGE", entry=150, sl=148, tp=156, status="open")   # market-entry signal
     A.tick(cl=fk, px_fn=PX(150.1)); r = [x for x in rows() if x["symbol"] == "SOLUSDT"][0]
     assert r["status"] == "open_order" and r["order_type"] == "market"
     fk.positions = [dict(symbol="SOL_USDT", positionType=1, holdVol=r["vol"], positionId=9, openType=1, holdAvgPrice=150.1)]
     fk.stops = [dict(id=31, symbol="SOL_USDT", positionId=9, state=1)]
     A.tick(cl=fk, px_fn=PX(150.3)); assert [x for x in rows() if x["id"] == r["id"]][0]["status"] == "filled"
-    db.update(i, sl=149.0, tp=153.0)                                   # bot moved stop/target (e.g. FVG+TREND final levels)
+    db.update(i, sl=149.0, tp=153.0)                                   # bot moved stop/target
     A.tick(cl=fk, px_fn=PX(150.3)); ch = [c for c in fk.calls if c[0] == "change_stop"]
     assert ch and ch[-1][2] == dict(sl=149.0, tp=153.0)
     db.update(i, status="sl", closed_at=datetime.now(timezone.utc).isoformat(), result_r=-1.0)
@@ -554,8 +555,8 @@ def test_weex_key_needs_all_three_env_vars(monkeypatch):
     monkeypatch.setenv("WEEX_API_PASSPHRASE", ""); assert not _WX_KEY_PRESENT()
 
 def test_exits_and_stops_managed_on_the_opening_exchange(monkeypatch):
-    both_live(monkeypatch, order_type="market", strategies=["FVG+TREND"]); fk, fw = DownMexc(), FakeWeex()
-    i = sig(symbol="SOLUSDT", strategy="FVG+TREND", entry=150, sl=148, tp=156, status="open")
+    both_live(monkeypatch, order_type="auto", strategies=["PAT-WEDGE"]); fk, fw = DownMexc(), FakeWeex()
+    i = sig(symbol="SOLUSDT", strategy="PAT-WEDGE", entry=150, sl=148, tp=156, status="open")
     A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(150.1)); r = rows()[0]
     assert r["exchange"] == "weex" and creates(fw)[0]["type"] == "MARKET"
     fk2 = Fake()                                                                     # MEXC is back: trade must stay on WEEX
@@ -701,41 +702,8 @@ def test_leverage_and_size_commands():
     A.tg_command("/autotrade size 250"); assert A.settings(0)["max_notional_usdt"] == 250
     A.tg_callback("at:lv:max"); assert A.settings(0)["lev_mode"] == "max"
     t, mk = A.tg_command("/autotrade"); assert "Max position size" in t and "MAX" in t and "notional" not in t.lower().replace("lev", "")
-    assert any(b["callback_data"] == "at:ot:limit_market" for row in mk["inline_keyboard"] for b in row)
-
-def test_limit_to_market_dry_within_half_r(fresh):
-    enable(order_type="limit_market", limit_timeout_min=5); i = sig(); now = datetime.now(timezone.utc); fk = Fake(False)
-    A.tick(cl=fk, px_fn=PX(100300.0), now=now); r = rows()[0]
-    assert r["status"] == "open_order" and r["order_type"] == "limit_market" and json.loads(r["note"])["then_market"] == 1
-    A.tick(cl=fk, px_fn=PX(100300.0), now=now + timedelta(minutes=2)); assert rows()[0]["status"] == "open_order"
-    A.tick(cl=fk, px_fn=PX(100400.0), now=now + timedelta(minutes=6)); r = rows()[0]                  # 0.4R away -> market
-    assert r["status"] == "filled" and r["order_type"] == "market" and r["fill_price"] == 100400.0 and abs(r["risk_usdt"] - 10) < 0.2
-    assert any("→ market" in t for t in fresh) and fk.calls == []
-
-def test_limit_to_market_skipped_when_price_ran():
-    enable(order_type="limit_market", limit_timeout_min=5); sig(); now = datetime.now(timezone.utc)
-    A.tick(cl=Fake(False), px_fn=PX(100300.0), now=now)
-    A.tick(cl=Fake(False), px_fn=PX(100800.0), now=now + timedelta(minutes=6)); r = rows()[0]           # 0.8R away -> skip
-    assert r["status"] == "cancelled" and "no market entry" in r["exit_reason"] and "0.80R" in r["exit_reason"]
-
-def test_limit_to_market_skipped_when_signal_invalid():
-    enable(order_type="limit_market", limit_timeout_min=5); i = sig(); now = datetime.now(timezone.utc)
-    A.tick(cl=Fake(False), px_fn=PX(100300.0), now=now); db.update(i, status="expired")
-    A.tick(cl=Fake(False), px_fn=PX(100100.0), now=now + timedelta(minutes=6)); r = rows()[0]
-    assert r["status"] == "cancelled" and r["exit_reason"].startswith("not filled in 5 min; no market entry: signal expired")
-
-def test_limit_to_market_live_cancels_then_market_same_exchange(monkeypatch):
-    both_live(monkeypatch, order_type="limit_market", limit_timeout_min=10); sig(); now = datetime.now(timezone.utc); fk, fb = Fake(), FakeWeex()
-    A.tick(cl={"mexc": fk, "weex": fb}, px_fn=PX(100300.0), now=now); ext = rows()[0]["ext_oid"]
-    A.tick(cl={"mexc": fk, "weex": fb}, px_fn=PX(100200.0), now=now + timedelta(minutes=11))
-    cr = creates(fk); assert len(cr) == 2 and cr[0]["type"] == 1 and cr[1]["type"] == 5 and cr[1]["externalOid"] == ext + "m"
-    assert fk.n("cancel_ext") == 1 and fb.n("create_order") == 0 and rows()[0]["status"] == "open_order" and rows()[0]["order_type"] == "market"
-    A.tick(cl={"mexc": fk, "weex": fb}, px_fn=PX(100200.0), now=now + timedelta(minutes=12)); assert rows()[0]["status"] == "filled"
-
-def test_limit_market_needs_timeout():
-    s = A.save_settings(dict(limit_timeout_min=0, order_type="limit_market")); assert s["limit_timeout_min"] == 15
-    s = A.save_settings(dict(order_type="limit", limit_timeout_min=0)); assert s["limit_timeout_min"] == 0 and s["order_type"] == "limit"
-    s = A.save_settings(dict(order_type="market")); assert s["order_type"] == "market"
+    cbs = [b["callback_data"] for row in mk["inline_keyboard"] for b in row]
+    assert "at:ot:auto" in cbs and "at:ot:limit" in cbs and "at:ot:limit_market" not in cbs and "at:ot:market" not in cbs
 
 # =================== t144u: 📐 Size line on crypto signal alerts (additive) ===================
 def _sz_reset():
@@ -855,12 +823,6 @@ def test_live_bumped_order_and_fill_alert(monkeypatch, fresh, small):
     fk.positions = [dict(symbol="SMALL_USDT", positionType=1, holdVol=10, positionId=1)]
     A.tick(cl=fk, px_fn=PX(1.01)); assert srow()["status"] == "filled" and any("filled" in t and "Min-order bump" in t for t in fresh)
 
-def test_limit_to_market_skips_when_bump_over_cap_at_live_price(fresh, small):
-    enable(order_type="limit_market", limit_timeout_min=5, risk_usdt=0.5, exchanges="mexc"); ssig(); now = datetime.now(timezone.utc)
-    A.tick(cl=Fake(False), px_fn=PX(1.01), now=now); assert srow()["status"] == "open_order" and srow()["vol"] == 10
-    A.tick(cl=Fake(False), px_fn=PX(1.02), now=now + timedelta(minutes=6)); r = srow()     # at 1.02 the 10-ct minimum risks $1.20 > $1 cap
-    assert r["status"] == "cancelled" and "no market entry" in r["exit_reason"] and "bump cap" in r["exit_reason"]
-
 def test_bump_commands_panel_and_validation():
     A.tg_command("/autotrade bumprisk 2"); A.tg_command("/autotrade bumpmargin 5"); s = A.settings(0)
     assert s["bump_max_risk_usdt"] == 2 and s["bump_max_margin_usdt"] == 5 and s["min_bump"] is True
@@ -958,3 +920,97 @@ def test_size_line_in_margin_and_pct_modes():
     assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  0.01 BTC · $1,000.00 position · risk $10.00 (1% of MEXC $1,000.00) · ≤5x → margin ~$200.00"
     A.save_settings(dict(sizing_mode="risk", risk_usdt=10)); _sz_reset()
     assert sizing.line("BTCUSDT", 100000, 99000) == "📐 <b>Size</b>  0.01 BTC · $1,000.00 position · risk $10.00 · ≤5x → margin ~$200.00"
+
+
+# =================== t160u: follow the signal's entry type, never limit -> market; 70%-to-target cancel rule ===================
+def test_entry_type_mapping():
+    assert {k: A.entry_type(k) for k in A.STRATS} == {"DON20": "market", "DON28": "market", "BRK": "market", "PAT-WEDGE": "market", "CHK": "market",
+                                                      "FVG-D1": "limit", "FVG-PLAN": "limit", "PAT-TRIPLE-C": "market", "FVG+TREND": "limit"}
+    assert A.entry_type("SOMETHING-NEW") == "limit"
+
+def test_limit_signal_gets_limit_and_market_signal_gets_market(monkeypatch):
+    live(monkeypatch, order_type="auto", limit_timeout_min=1440, strategies=["FVG-D1", "BRK"]); fk = Fake()
+    sig(strategy="FVG-D1", entry=100000.0, sl=99000.0, tp=103000.0); sig(symbol="SOLUSDT", strategy="BRK", entry=150, sl=148, tp=156, status="open")
+    A.tick(cl=fk, px_fn=lambda q: {"BTCUSDT": 100500.0, "SOLUSDT": 150.2})
+    b = {c["symbol"]: c for c in creates(fk)}
+    assert b["BTC_USDT"]["type"] == 1 and b["BTC_USDT"]["price"] == 100000.0 and b["SOL_USDT"]["type"] == 5
+    r = {x["symbol"]: x for x in rows()}; assert r["BTCUSDT"]["order_type"] == "limit" and r["SOLUSDT"]["order_type"] == "market"
+    assert json.loads(r["BTCUSDT"]["note"])["entry_type"] == "limit" and json.loads(r["BTCUSDT"]["note"])["timeout"] == 1440
+    sig(symbol="ETHUSDT", strategy="BRK", entry=150, sl=148, tp=156, status="open"); CON["ETH_USDT"] = dict(CON["SOL_USDT"], symbol="ETH_USDT")
+    try:
+        A.tick(cl=fk, px_fn=lambda q: {"BTCUSDT": 100500.0, "SOLUSDT": 150.2, "ETHUSDT": 151.2})   # 0.6R drift on a market signal -> skipped
+        e = [x for x in rows() if x["symbol"] == "ETHUSDT"][0]; assert e["status"] == "skipped" and "moved 0.60R" in json.loads(e["note"])["skip"]
+    finally: CON.pop("ETH_USDT")
+    A.save_settings(dict(order_type="limit")); sig(symbol="XRPUSDT", strategy="BRK", entry=1.0, sl=0.9, tp=1.3, status="open")
+    CON["XRP_USDT"] = dict(CON["NOAPI_USDT"], symbol="XRP_USDT", apiAllowed=True)
+    try:
+        A.tick(cl=fk, px_fn=lambda q: {"BTCUSDT": 100500.0, "SOLUSDT": 150.2, "XRPUSDT": 1.01}); x = creates(fk)[-1]
+        assert x["symbol"] == "XRP_USDT" and x["type"] == 1                                            # "Limit only": market signal as limit
+    finally: CON.pop("XRP_USDT")
+
+def test_unfilled_limit_never_goes_market_and_waits_past_15_min(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", limit_timeout_min=1440, strategies=["FVG-D1"]); sig(strategy="FVG-D1"); fk = Fake(); now = datetime.now(timezone.utc)
+    A.tick(cl=fk, px_fn=PX(100500.0), now=now)
+    A.tick(cl=fk, px_fn=PX(100500.0), now=now + timedelta(minutes=20)); assert rows()[0]["status"] == "open_order" and fk.n("cancel_ext") == 0
+    A.tick(cl=fk, px_fn=PX(100500.0), now=now + timedelta(hours=25)); r = rows()[0]          # 24 h max wait (safety net)
+    assert r["status"] == "cancelled" and "max wait (24 h)" in r["exit_reason"] and fk.n("cancel_ext") == 1
+    assert [c["type"] for c in creates(fk)] == [1] and any("limit not filled, cancelled" in t and "never sent at market" in t for t in fresh)
+
+def test_limit_cancelled_at_70pct_of_target(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", limit_timeout_min=1440, strategies=["FVG+TREND"]); sig(strategy="FVG+TREND"); fk = Fake()         # entry 100000, TP 103000 -> 70% = 102100
+    A.tick(cl=fk, px_fn=PX(100500.0)); A.tick(cl=fk, px_fn=PX(102000.0)); assert rows()[0]["status"] == "open_order"   # 67%: still open
+    A.tick(cl=fk, px_fn=PX(102100.0)); r = rows()[0]
+    assert r["status"] == "cancelled" and "reached 70% of target without fill" in r["exit_reason"] and fk.n("cancel_ext") == 1
+    assert any("limit cancelled, price reached 70% of target without fill" in t for t in fresh) and [c["type"] for c in creates(fk)] == [1]
+
+def test_cancel_pct_setting_tp1_for_ptp_and_short_side(monkeypatch, fresh):
+    A.tg_command("/autotrade cancelpct 50"); assert A.settings(0)["cancel_pct"] == 50
+    assert "⚠️" in A.tg_command("/autotrade cancelpct 5")[0] and "⚠️" in A.tg_command("/autotrade cancelpct 150")[0]
+    enable(order_type="auto", limit_timeout_min=1440, strategies=["FVG-D1"]); sig(strategy="FVG-D1", direction="short", entry=100000.0, sl=101000.0, tp=97000.0)   # TP1 = 1.5R = 98500
+    A.tick(cl=Fake(False), px_fn=PX(99400.0)); assert rows()[0]["status"] == "open_order"      # 40% of the way to TP1
+    A.tick(cl=Fake(False), px_fn=PX(99250.0)); r = rows()[0]                                    # 50% to TP1 (98500), only 25% to TP
+    assert r["status"] == "cancelled" and "50% of target" in r["exit_reason"] and "98,500" in r["exit_reason"].replace("98500", "98,500")
+    assert A.target_of("FVG-D1", 100000, 101000, 97000) == 98500 and A.target_of("FVG+TREND", 100000, 99000, 103000) == 103000 and A.target_of("DON20", 1, 0.9, None) is None
+
+def test_no_limit_placed_when_price_already_past_the_cancel_threshold(fresh):
+    enable(order_type="auto", limit_timeout_min=1440, strategies=["FVG-PLAN"]); sig(strategy="FVG-PLAN", entry=100000.0, sl=99000.0, tp=103000.0)
+    A.tick(cl=Fake(False), px_fn=PX(100500.0)); assert rows()[0]["status"] == "open_order"
+    A.tick(cl=Fake(False), px_fn=PX(101000.0)); assert rows()[0]["status"] == "open_order"            # 33% of the way: still open
+    sig(symbol="SOLUSDT", strategy="FVG-PLAN", entry=150, sl=148, tp=156); A.tick(cl=Fake(False), px_fn=lambda q: {"BTCUSDT": 101000.0, "SOLUSDT": 154.5})
+    s2 = [x for x in rows() if x["symbol"] == "SOLUSDT"][0]
+    assert s2["status"] == "skipped" and "already 75% of the way to the target" in json.loads(s2["note"])["skip"]
+
+def test_live_stop_hit_before_fill_cancels(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", limit_timeout_min=1440, strategies=["FVG-D1"]); sig(strategy="FVG-D1", direction="short", entry=100000.0, sl=101000.0, tp=97000.0); fk = Fake()
+    A.tick(cl=fk, px_fn=PX(99800.0)); assert rows()[0]["status"] == "open_order"
+    A.tick(cl=fk, px_fn=PX(101100.0)); r = rows()[0]                                              # gap through the entry to the stop, limit never filled
+    assert r["status"] == "cancelled" and "hit the stop before fill" in r["exit_reason"] and fk.n("cancel_ext") == 1 and len(creates(fk)) == 1
+
+def test_partial_fill_kept_rest_cancelled_at_70pct(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", limit_timeout_min=1440, strategies=["FVG+TREND"]); sig(strategy="FVG+TREND"); fk = Fake()
+    A.tick(cl=fk, px_fn=PX(100500.0)); r = rows()[0]; fk.orders[r["ext_oid"]].update(dealVol=40, dealAvgPrice=100000.0)   # 40 of 100 filled
+    A.tick(cl=fk, px_fn=PX(102500.0)); r = rows()[0]
+    assert r["status"] == "filled" and r["vol"] == 40 and abs(r["risk_usdt"] - 4.0) < 1e-9 and fk.n("cancel_ext") == 1
+    assert any("limit partly filled, rest cancelled" in t and "40 of 100 filled" in t and "never sent at market" in t for t in fresh)
+    assert [c["type"] for c in creates(fk)] == [1]
+
+def test_order_type_and_wait_migration_and_commands(fresh):
+    db.kv_set(A.KEY, json.dumps(dict(enabled=False, dry_run=True, order_type="limit_market", limit_timeout_min=15, risk_usdt=0.5, lev_mode="max", max_open=50)))
+    A._S.update(t=0, v=None); s = A.settings(0)
+    assert s["order_type"] == "auto" and s["limit_timeout_min"] == 1440 and s["cancel_pct"] == 70 and s["enabled"] is False and s["dry_run"] is True
+    assert s["risk_usdt"] == 0.5 and s["lev_mode"] == "max" and s["max_open"] == 50
+    for ot, want in (("market", "auto"), ("limit", "limit"), ("auto", "auto")):
+        db.kv_set(A.KEY, json.dumps(dict(order_type=ot))); A._S.update(t=0, v=None); assert A.settings(0)["order_type"] == want
+    A.save_settings(dict(limit_timeout_min=15)); A._S.update(t=0, v=None); assert A.settings(0)["limit_timeout_min"] == 15   # explicit choice kept
+    t, _ = A.tg_command("/autotrade limit_market"); assert "removed" in t and A.settings(0)["order_type"] == "auto"
+    A.tg_command("/autotrade limit"); assert A.settings(0)["order_type"] == "limit"
+    A.tg_command("/autotrade market"); assert A.settings(0)["order_type"] == "auto"
+    A.tg_callback("at:ot:limit"); assert A.settings(0)["order_type"] == "limit"; A.tg_callback("at:ot:limit_market"); assert A.settings(0)["order_type"] == "auto"
+    A.tg_command("/autotrade maxwait 48"); assert A.settings(0)["limit_timeout_min"] == 2880
+    A.tg_command("/autotrade maxwait 0"); assert A.settings(0)["limit_timeout_min"] == 0
+    assert "⚠️" in A.tg_command("/autotrade maxwait 500")[0]
+    A.tg_callback("at:to:1440"); t, mk = A.tg_command("/autotrade")
+    assert "follow the signal" in t and "70% of the way to the target" in t and "max wait 24 h" in t and "Limit → Market" not in t
+    with pytest.raises(ValueError): A.save_settings(dict(order_type="limit_market_x"))
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
+    assert "limit_market" not in src and "cancel_pct:+$('atcp').value" in src and "Follow the signal" in src
