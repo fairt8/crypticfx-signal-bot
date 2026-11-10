@@ -285,7 +285,7 @@ def help_html():
         "  /pnl SYMBOL · /trades SYMBOL – one token\n  /don20 · /don28 – DON20 ⭐ / DON28 🔷 total PnL\n  /stats – 30-day stats by tier\n\n"
         "🧭 <b>More</b>\n  /strategies – tiers + live verdicts\n  /retired – retired strategy history\n"
         "  /explain ID – full signal card + AI note\n  /ask question – ask AI\n  📱 /app – the Mini App (also the ☰ button)\n\n"
-        "🤖 <b>Auto-trade (MEXC + WEEX fallback)</b>\n  /autotrade – settings, strategy + exchange switches\n  /autotrade off – stop new auto orders\n  /flatten – close all auto trades (asks first)")
+        "🤖 <b>Auto-trade (MEXC and/or WEEX)</b>\n  /autotrade – settings, strategy + exchange switches\n  /autotrade off – stop new auto orders\n  /flatten – close all auto trades (asks first)")
 HELP = "/signals – open/pending signals\n/primary · /secondary – one tier\n/alerts – alert mode\n/stats – 30-day stats\n/help – all commands"
 def cmd_stats():
     from . import strategies as SG
@@ -379,7 +379,7 @@ def set_menu_button():
     set_commands()
 COMMANDS = [("signals", "📡 Open + pending signals by tier"), ("primary", "⭐ PRIMARY signals"), ("secondary", "🔷 SECONDARY signals"),
             ("alerts", "🔔 Push ⭐ only or ⭐ + 🔷"), ("open", "📈 Live trades with PnL"), ("closed", "🏁 Closed results"), ("stats", "📊 30-day stats by tier"),
-            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("autotrade", "🤖 Auto-trade settings (MEXC + WEEX)"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
+            ("don20", "⭐ DON20 PnL"), ("strategies", "🧭 Strategy tiers"), ("autotrade", "🤖 Auto-trade settings (MEXC / WEEX)"), ("app", "📱 Open the Mini App"), ("help", "❓ All commands")]
 def set_commands():
     """Owner chat's / command menu (setMyCommands, chat scope). Best effort."""
     try:

@@ -1,4 +1,4 @@
-"""Exchange adapters for the auto-trade add-on: MEXC (primary by default) and WEEX (fallback) behind one interface.
+"""Exchange adapters for the auto-trade add-on: MEXC and WEEX behind one interface (order chosen by the `exchanges` setting).
 
 All quantities are in the exchange's own order units (`vol`): MEXC = contracts (contractSize base units each),
 WEEX = base-coin qty (contractSize 1). instrument() returns a dict that mexc.size / round_price / floor_vol understand
@@ -13,7 +13,7 @@ from decimal import Decimal
 import requests
 from . import mexc as M, weex as W
 
-NAMES = ("mexc", "weex")            # route order: primary first, then the fallback
+NAMES = ("mexc", "weex")            # supported exchanges; the route order comes from settings["exchanges"]
 LABEL = {"mexc": "MEXC", "weex": "WEEX"}
 
 class Unavailable(Exception):

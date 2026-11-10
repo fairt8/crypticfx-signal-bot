@@ -15,10 +15,11 @@ Flow (every AUTOTRADE_POLL_S, default 60 s, leader instance only):
   cancelled at the timeout or when the signal invalidates first.
 Dry-run (default) logs/simulates the same orders without calling any private exchange endpoint.
 
-Exchanges (app/exchanges.py): primary (default MEXC) and, with failover on (default: on once WEEX keys exist), the other
-one as backup. A NEW order goes to the backup only when the primary can't take it with nothing executed there: failed
-health check, unreachable / 5xx / maintenance before or on placement (confirmed by a client-order-id lookup when the
-primary answers), or the symbol is not tradable on the primary. If the primary's state is UNKNOWN (timeout after the
+Exchanges (app/exchanges.py), setting `exchanges` (user 2026-11-10): ["mexc"] MEXC only, ["weex"] WEEX only, ["mexc","weex"]
+MEXC first + WEEX fallback (default), ["weex","mexc"] WEEX first + MEXC fallback. A NEW order goes to the second exchange
+only when the first can't take it with nothing executed there: failed health check, unreachable / 5xx / maintenance
+before or on placement (confirmed by a client-order-id lookup when the first answers), the symbol is not tradable on the
+first, or the first's minimum order is above the min-order bump cap. If the primary's state is UNKNOWN (timeout after the
 order was sent) the signal is NOT sent to the backup (no double position); it is resolved by client order id later.
 Every trade is managed on the exchange it was opened on; if that exchange is down its exits keep retrying every tick
 (the exchange-side SL/TP still protect the position) and Telegram says so."""
@@ -39,9 +40,13 @@ MAX_PX_DEV = float(os.getenv("AUTOTRADE_MAX_PX_DEV", "0.02"))   # MEXC vs Binanc
 FEE = float(os.getenv("AUTOTRADE_FEE", "0.0005"))               # MEXC API futures taker fee per side (announcement 2026-03-30)
 DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_open=3, leverage=5, order_type="limit",
                 limit_timeout_min=15, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
-                primary_exchange="mexc", failover=None, ex_on={"mexc": True, "weex": True}, lev_mode="cap", size_line=True)
+                exchanges=["mexc", "weex"], lev_mode="cap", size_line=True,
+                min_bump=True, bump_max_risk_usdt=0.0, bump_max_margin_usdt=0.0)   # bump caps: risk 0 = auto (2x risk_usdt), margin 0 = off
+EX_MODES = (("mexc",), ("weex",), ("mexc", "weex"), ("weex", "mexc"))
+EX_MODE_LABEL = {("mexc",): "MEXC only", ("weex",): "WEEX only", ("mexc", "weex"): "MEXC → WEEX", ("weex", "mexc"): "WEEX → MEXC"}
+LEGACY_EX = ("primary_exchange", "failover", "ex_on")   # pre-2026-11-10 exchange settings, migrated to `exchanges` on load
 ORDER_TYPES = ("limit", "market", "limit_market")   # limit_market: limit at entry; at the timeout -> market if still <= 0.5R away and valid
-OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}   # failover None = on when WEEX keys exist
+OT_LABEL = {"limit": "Limit", "market": "Market", "limit_market": "Limit → Market"}
 STATE = dict(last_tick=None, last_result=None, errors=collections.deque(maxlen=30), skips=collections.deque(maxlen=30), backoff_until=0, idle_until=0, perm={})
 PERM_NOTE = {"mexc": ("MEXC key can't read the account balance (code 700007). In MEXC ▸ API Management edit this key and also tick "
                       "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short."),
@@ -98,16 +103,39 @@ def settings(max_age=300):
         except Exception as e:
             if _S["v"] is not None: return dict(_S["v"])
             raise
-        v = migrate(dict(DEFAULTS, **(json.loads(raw) if raw else {})))
+        v = migrate(json.loads(raw) if raw else {})
         _S.update(t=time.time(), v=v); return dict(v)
-def migrate(v):
-    """Bybit was removed (user 2026-11-09): settings that mention it are mapped to WEEX. Never touches enabled / dry_run."""
-    v = dict(v)
-    if v.get("primary_exchange") not in X.NAMES: v["primary_exchange"] = "weex" if v.get("primary_exchange") == "bybit" else "mexc"
+def legacy_exchanges(v):
+    """`exchanges` list from the old primary_exchange / failover / ex_on settings (Bybit, removed 2026-11-09, maps to WEEX).
+    failover None (auto) or True keeps both exchanges (primary first); False keeps only the primary. Disabled ones drop out."""
+    pri = v.get("primary_exchange"); pri = "weex" if pri in ("weex", "bybit") else "mexc"
     on = dict(v.get("ex_on") or {})
     if "bybit" in on: on.setdefault("weex", bool(on["bybit"]))
-    v["ex_on"] = dict(DEFAULTS["ex_on"], **{k: bool(x) for k, x in on.items() if k in X.NAMES})
-    if not any(v["ex_on"].values()): v["ex_on"] = dict(DEFAULTS["ex_on"])
+    on = {k: bool(on.get(k, True)) for k in X.NAMES}
+    order = [pri] + ([x for x in X.NAMES if x != pri] if v.get("failover") is not False else [])
+    out = [x for x in order if on[x]]
+    if not out: out = [x for x in X.NAMES if on[x]][:1] or ["mexc"]
+    return out
+def norm_exchanges(v):
+    """'mexc' | 'weex' | 'mexc,weex' | 'weex,mexc' | 'both' | list -> validated list (first = tried first)."""
+    if isinstance(v, str):
+        v = v.lower().replace("→", ",").replace(">", ",").replace(" ", ",")
+        v = ["mexc", "weex"] if v.strip(",") == "both" else [x for x in v.split(",") if x]
+    if not isinstance(v, (list, tuple)) or not v: raise ValueError("exchanges must be mexc, weex, mexc,weex or weex,mexc")
+    v = [str(x).strip().lower() for x in v]
+    if any(x not in X.NAMES for x in v) or len(set(v)) != len(v): raise ValueError("exchanges must be mexc, weex, mexc,weex or weex,mexc")
+    return list(v)
+def migrate(raw):
+    """Saved settings -> current shape. Old exchange keys (primary_exchange / failover / ex_on, incl. Bybit) become
+    `exchanges` (user 2026-11-10). Never touches enabled / dry_run."""
+    raw = dict(raw or {})
+    if "exchanges" in raw:
+        try: ex = norm_exchanges(raw["exchanges"])
+        except ValueError: ex = legacy_exchanges(raw)
+    elif any(k in raw for k in LEGACY_EX): ex = legacy_exchanges(raw)
+    else: ex = list(DEFAULTS["exchanges"])
+    for k in LEGACY_EX: raw.pop(k, None)
+    v = dict(DEFAULTS, **raw); v["exchanges"] = ex
     return v
 def _num(x, lo, hi, name, kind=float):
     try: v = kind(x)
@@ -123,19 +151,26 @@ def validate(patch, cur):
             s["enabled"] = v
         elif k == "dry_run":
             v = bool(v)
-            if not v and not any(X.key_present(x) for x in X.NAMES if (s.get("ex_on") or {}).get(x, True)):
+            if not v and not any(X.key_present(x) for x in s["exchanges"]):
                 raise ValueError("Live mode needs an exchange key in the server env file (MEXC_API_KEY/MEXC_API_SECRET or WEEX_API_KEY/WEEX_API_SECRET/WEEX_API_PASSPHRASE). Dry-run stays on.")
             s["dry_run"] = v
-        elif k == "primary_exchange":
+        elif k == "exchanges": s[k] = norm_exchanges(v)
+        elif k == "primary_exchange":   # legacy: put this exchange first (both mode) or switch the single exchange to it
             if v not in X.NAMES: raise ValueError("primary exchange must be mexc or weex")
-            s[k] = v
-        elif k == "failover":
-            s[k] = None if v is None else bool(v)
-        elif k == "ex_on":
+            cur = list(s["exchanges"]); s["exchanges"] = [v] + [x for x in cur if x != v] if (len(cur) > 1 or v in cur) else [v]
+        elif k == "failover":           # legacy: on = both (current first exchange first), off = only the first one
+            pri = s["exchanges"][0]; s["exchanges"] = [pri] + ([x for x in X.NAMES if x != pri] if v is None or bool(v) else [])
+        elif k == "ex_on":              # legacy: add (at the end) / remove an exchange
             if not isinstance(v, dict) or any(x not in X.NAMES for x in v): raise ValueError("ex_on must map mexc/weex to on/off")
-            on = dict(DEFAULTS["ex_on"], **(s.get("ex_on") or {})); on.update({x: bool(y) for x, y in v.items()})
-            if not any(on.values()): raise ValueError("keep at least one exchange enabled")
-            s[k] = on
+            cur = list(s["exchanges"])
+            for x, y in v.items():
+                if y and x not in cur: cur.append(x)
+                if not y and x in cur: cur.remove(x)
+            if not cur: raise ValueError("keep at least one exchange enabled")
+            s["exchanges"] = cur
+        elif k == "min_bump": s[k] = bool(v)
+        elif k == "bump_max_risk_usdt": s[k] = round(_num(v, 0, 100000, "Bump cap: max risk per trade (USDT, 0 = auto 2× risk)"), 4)
+        elif k == "bump_max_margin_usdt": s[k] = round(_num(v, 0, 10000000, "Bump cap: max margin per trade (USDT, 0 = off)"), 2)
         elif k == "strategies":
             bad = [x for x in v if x not in STRATS]
             if bad: raise ValueError(f"not an auto-trade strategy: {', '.join(bad)} (crypto only: {', '.join(STRATS)})")
@@ -183,13 +218,18 @@ def adapters(cl=None):
         return _CL["ads"]
     if isinstance(cl, dict): return {k: X.wrap(k, v) for k, v in cl.items()}
     return {"mexc": X.wrap("mexc", cl)}
-def failover_on(s): return bool(s["failover"]) if s.get("failover") is not None else W.key_present()
-def ex_on(s, name): return bool(dict(DEFAULTS["ex_on"], **(s.get("ex_on") or {})).get(name, True))
+def exchanges_of(s):
+    try: return norm_exchanges(s.get("exchanges") or DEFAULTS["exchanges"])
+    except ValueError: return list(DEFAULTS["exchanges"])
+def failover_on(s): return len(exchanges_of(s)) > 1
+def ex_on(s, name): return name in exchanges_of(s)
+def mode_label(s): return EX_MODE_LABEL.get(tuple(exchanges_of(s)), " → ".join(X.LABEL[x] for x in exchanges_of(s)))
+def bump_cap(s):
+    r = float(s.get("bump_max_risk_usdt") or 0); return r if r > 0 else M.BUMP_AUTO_X * float(s["risk_usdt"])
 def route(s, ads):
-    """Exchanges to try for a NEW order, in order: primary, then the backup when failover is on."""
-    pri = s.get("primary_exchange") or "mexc"; order = [pri] + ([x for x in X.NAMES if x != pri] if failover_on(s) else [])
+    """Exchanges to try for a NEW order, in the user's order (`exchanges`); live skips an exchange without its key."""
     live = not s["dry_run"]
-    return [x for x in order if x in ads and ex_on(s, x) and (not live or X.key_present(x))]
+    return [x for x in exchanges_of(s) if x in ads and (not live or X.key_present(x))]
 def prices(symbols):
     from . import trades
     return trades.prices(sorted(set(symbols)), [])
@@ -301,7 +341,7 @@ def manage(ctx, r, src, s):
         if fill:
             cs = (r["qty"] / r["vol"]) if r["vol"] else 0
             _upd(r["id"], status="filled", filled_at=iso(now), fill_price=fill[0], vol=fill[1], qty=fill[1] * cs)
-            ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'}\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing")); return
+            ctx.msg(r, _hdr(r, "✅", "filled") + f"\n📍 {_fmt(fill[0])} · {fill[1]:g} {'contracts' if ex == 'mexc' else 'qty'} · risk {float(r['risk_usdt'] or 0):.2f} USDT\n🛑 {_fmt(r['sl'])}" + (f"   🎯 {_fmt(r['tp'])}" if r["tp"] else "   🎯 trailing") + bump_line(_bump_of(r))); return
         reason = None; timed_out = False
         try: nt = json.loads(r.get("note") or "{}"); to = int(nt.get("timeout", 0)); conv = bool(nt.get("then_market"))
         except Exception: to, conv = 0, False
@@ -320,7 +360,9 @@ def manage(ctx, r, src, s):
                     ctx.msg(r, _hdr(r, "✅", "partly filled before cancel") + f"\n{dv:g} filled"); return
             if timed_out and conv:   # Limit → Market
                 ok, why_not = _market_ok(r, src, p, don)
-                if ok: _to_market(ctx, r, p, s, to); return
+                if ok:
+                    try: _to_market(ctx, r, p, s, to); return
+                    except M.Skip as x: why_not = str(x)   # e.g. minimum order above the bump cap at the live price
                 reason += f"; no market entry: {why_not}"
             _upd(r["id"], status="cancelled", closed_at=iso(now), exit_reason=reason)
             ctx.msg(r, _hdr(r, "⌛", "limit cancelled") + f"\n<i>{reason}</i>")
@@ -388,11 +430,28 @@ def candidates(s, sigs, dons, known):
 def _sized(ad, con, c, ref, sl, direction, s):
     """Risk ÷ stop-distance size (exchange step / min / max position size), then leverage: cap or MAX for the size tier,
     stepped down while the estimated liquidation price is at or inside the stop."""
-    z = M.size(c, ref, sl, s["risk_usdt"], s.get("max_notional_usdt") or 0, 10**6)
+    z = M.size(c, ref, sl, s["risk_usdt"], s.get("max_notional_usdt") or 0, 10**6,
+               bump=bool(s.get("min_bump", True)), bump_max_risk=float(s.get("bump_max_risk_usdt") or 0))
     lev, info = X.choose_leverage(ad, con, c, z["vol"], z["notional"], ref, sl, direction, s.get("lev_mode") or "cap", s["leverage"])
     if info.get("stepped_from"):
         print(f"[autotrade] leverage {info['stepped_from']}x -> {lev}x on {ad.label} {con}: est. liquidation {info['liq']:g} must be beyond the stop {sl:g}", flush=True)
-    z.update(leverage=lev, margin=round(z["notional"] / lev, 4), lev_info=info); return z
+    z.update(leverage=lev, margin=round(z["notional"] / lev, 4), lev_info=info)
+    b = z.get("bump"); mcap = float(s.get("bump_max_margin_usdt") or 0)
+    if b:
+        b.update(to_margin=z["margin"], margin_cap=mcap or None)
+        if mcap and z["margin"] > mcap + 1e-9:
+            raise M.MinSize(f"{ad.label} minimum order {b['to_vol']:g} {b['unit']} needs ${z['margin']:.2f} margin at {lev}x, above the bump margin cap ${mcap:g}")
+    return z
+def bump_line(b, ex=None):
+    """'⬆️ Min-order bump' alert line (original vs bumped size and $ risk), or '' when the order was not bumped."""
+    if not b: return ""
+    u = "ct" if b.get("unit") == "contract" else "qty"
+    cap = f"cap ${b['cap_risk']:g}" + (" = 2× risk" if b.get("auto") else "") + (f", margin cap ${b['margin_cap']:g}" if b.get("margin_cap") else "")
+    return (f"\n⬆️ <b>Min-order bump</b>{(' on ' + X.LABEL.get(ex, ex)) if ex else ''}: {b['from_vol']:g} → {b['to_vol']:g} {u} · risk "
+            f"${b['from_risk']:.2f} → <b>${b['to_risk']:.2f}</b> ({cap})")
+def _bump_of(r):
+    try: return json.loads(r.get("note") or "{}").get("bump")
+    except Exception: return None
 
 def _market_ok(r, src, p, don):
     """Limit → Market at the timeout: signal still valid and price within MAX_SLIP_R (0.5R) of the entry, not beyond SL/TP."""
@@ -412,8 +471,8 @@ def _to_market(ctx, r, p, s, to):
     c = ad.instrument(con); z = _sized(ad, con, c, p, float(r["init_sl"] or r["sl"]), r["direction"], s)
     ext = (r["ext_oid"] + "m")[:32 if ex == "mexc" else 36]; e = M.round_price(p, c)
     upd = dict(order_type="market", entry=e, vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"],
-               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"))))
-    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · risk {z['risk']:.2f} USDT"
+               ext_oid=ext, note=json.dumps(dict(timeout=0, converted=f"limit not filled in {to} min", lev=z.get("lev_info"), **({"bump": z["bump"]} if z.get("bump") else {}))))
+    head = _hdr(r, "🔁", f"limit not filled in {to} min → market") + f"\n📍 ~{_fmt(e)} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + bump_line(z.get("bump"))
     if not live:
         _upd(r["id"], status="filled", filled_at=iso(now), fill_price=e, **upd); ctx.msg(r, head); return
     _upd(r["id"], status="placing", **upd)
@@ -436,8 +495,9 @@ def _perm(ctx, ex, s):
         _ERRSENT[k] = time.time(); ctx.msgs.append((s["dry_run"], "🔑 <b>AUTO · key permission</b>\n" + STATE["perm"][ex]))
 
 def open_trade(ctx, s, cnd):
-    """Route a new order: primary first, backup only when the primary can't take it with nothing executed there."""
-    order = route(s, ctx.ads); why = []; rid = None
+    """Route a new order in the user's exchange order; the next one only when the current can't take it with nothing
+    executed there (down / not listed / minimum order above the bump cap)."""
+    order = route(s, ctx.ads); why = []; rid = None; minsz = False
     if not order: raise M.Skip("no exchange enabled" + ("" if s["dry_run"] else " with an API key"))
     for ex in order:
         ad = ctx.ads[ex]
@@ -445,12 +505,14 @@ def open_trade(ctx, s, cnd):
         try: return _open_on(ctx, s, cnd, ad, rid, why)
         except X.Unavailable as e:
             why.append(str(e)); rid = e.row_id or rid
+        except M.MinSize as e:   # raised before any order call: safe to try the next exchange
+            why.append(str(e) if str(e).startswith(ad.label) else f"{ad.label}: {e}"); minsz = True
     msg = "; ".join(why) or "no exchange available"
     if rid:   # a placement failed with nothing executed and no backup could take it
         _upd(rid, status="error", closed_at=iso(ctx.now), note=json.dumps(dict(error=msg[:300])))
         ctx.msgs.append((s["dry_run"], f"⚠️ <b>AUTO · not placed</b> {cnd['symbol']} · {cnd['strategy']} #{cnd['ref_id']}\n<i>{msg[:300]}</i>"))
         return None
-    raise M.Skip(msg)
+    raise (M.MinSize if minsz else M.Skip)(msg)
 
 def _open_on(ctx, s, cnd, ad, rid, why):
     now = ctx.now; live = not s["dry_run"]; ex = ad.name
@@ -479,7 +541,9 @@ def _open_on(ctx, s, cnd, ad, rid, why):
             if ctx.position(ex, con, "long") or ctx.position(ex, con, "short"): raise M.Skip(f"there is already a {ad.label} position on {con} (manual?)")
             try: av = ad.usdt_available(); STATE["perm"].pop(ex, None)
             except (M.NoPermission, W.NoPermission): av = None; _perm(ctx, ex, s)
-            if av is not None and av < z["margin"] * 1.05: raise M.Skip(f"not enough USDT margin on {ad.label} ({av:.2f} available, {z['margin']:.2f} needed)")
+            if av is not None and av < z["margin"] * 1.05:
+                if z.get("bump"): raise M.MinSize(f"not enough USDT margin on {ad.label} for the bumped minimum order ({av:.2f} available, {z['margin']:.2f} needed)")
+                raise M.Skip(f"not enough USDT margin on {ad.label} ({av:.2f} available, {z['margin']:.2f} needed)")
         except (M.Skip, M.RateLimited, W.RateLimited): raise
         except Exception as e:
             if X.kind(e): raise down(e, "unreachable before the order")
@@ -491,15 +555,15 @@ def _open_on(ctx, s, cnd, ad, rid, why):
     row = dict(strategy=cnd["strategy"], symbol=cnd["symbol"], contract=con, direction=cnd["direction"], exchange=ex,
                order_type="market" if market else s["order_type"], entry=M.round_price(ref, c), sl=M.round_price(sl, c), tp=M.round_price(tp, c) if tp else None,
                init_sl=float(sl), vol=z["vol"], qty=z["qty"], notional=z["notional"], risk_usdt=z["risk"], leverage=z["leverage"], ext_oid=ext,
-               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}))))
+               dry=0 if live else 1, note=json.dumps(dict(timeout=to, lev=z.get("lev_info"), **({"then_market": 1} if conv else {}), **({"failover": "; ".join(why)[:200]} if why else {}), **({"bump": z["bump"]} if z.get("bump") else {}))))
     full = dict(row, source=cnd["source"], ref_id=cnd["ref_id"])
-    fo_line = ("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else ""
+    fo_line = (("\n↪️ <b>Backup exchange</b>: " + "; ".join(why)[:220]) if why else "") + bump_line(z.get("bump"), ex)
     if not live:   # dry-run: no private call; market fills at the live price now, limit waits for the fill
         row.update(status="filled" if market else "open_order")
         if market: row.update(fill_price=row["entry"], filled_at=iso(now))
         if rid: _upd(rid, **row); i = rid
         else: i = _insert(source=cnd["source"], ref_id=cnd["ref_id"], **row)
-        if i and (market or why): ctx.msg(full, _hdr(full, "✅" if market else "📝", ("filled (market)" if market else "limit placed") + via) + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + fo_line)
+        if i and (market or why or z.get("bump")): ctx.msg(full, _hdr(full, "✅" if market else "📝", ("filled (market)" if market else "limit placed") + via) + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + fo_line)
         print(f"[autotrade] DRY {ex} {row['order_type']} {row['direction']} {con} vol={z['vol']:g} @ {row['entry']} sl={row['sl']} tp={row['tp']} ({cnd['strategy']} #{cnd['ref_id']})", flush=True)
         return i
     if rid: _upd(rid, status="placing", **row); i = rid
@@ -510,7 +574,7 @@ def _open_on(ctx, s, cnd, ad, rid, why):
         oid = ad.place_open(con, cnd["direction"], z["vol"], row["entry"], market, z["leverage"], row["sl"], row["tp"], ext)
         _upd(i, status="open_order", order_id=oid)
         print(f"[autotrade] LIVE {ex} {row['order_type']} {row['direction']} {con} vol={z['vol']:g} @ {row['entry']} ({cnd['strategy']} #{cnd['ref_id']}) order {oid}", flush=True)
-        if why: ctx.msg(full, _hdr(full, "↪️", f"order placed{via}") + fo_line)
+        if why or z.get("bump"): ctx.msg(full, _hdr(full, "↪️" if why else "📝", f"order placed{via}") + f"\n📍 {_fmt(row['entry'])} · {z['vol']:g} · risk {z['risk']:.2f} USDT" + fo_line)
         return i
     except (M.RateLimited, W.RateLimited): raise   # stays 'placing'; resolved by client order id next tick
     except Exception as e:
@@ -583,6 +647,9 @@ def tick(cl=None, px_fn=None, now=None):
                 if open_trade(ctx, s, cnd): n_open += 1; held.add(cnd["symbol"]); res["opened"] += 1
             except M.Skip as e:
                 res["skipped"] += 1; STATE["skips"].append(dict(t=iso(now), sym=cnd["symbol"], k=cnd["strategy"], why=str(e)))
+                if isinstance(e, M.MinSize):   # the user asked to see these: size vs exchange minimum / bump cap
+                    from .telegram import esc
+                    ctx.msgs.append((s["dry_run"], f"⏭️ <b>AUTO · skipped (minimum order)</b>{' · 🧪 DRY-RUN' if s['dry_run'] else ''}\n{esc(cnd['symbol'])} · {esc(cnd['strategy'])} #{cnd['ref_id']}\n<i>{esc(str(e)[:300])}</i>"))
                 try: _insert(source=cnd["source"], ref_id=cnd["ref_id"], strategy=cnd["strategy"], symbol=cnd["symbol"], direction=cnd["direction"],
                              entry=cnd["entry"], sl=cnd["sl"], tp=cnd["tp"], status="skipped", dry=1 if s["dry_run"] else 0, note=json.dumps(dict(skip=str(e)[:200])))
                 except Exception as x: _err("record skip", x)
@@ -652,20 +719,22 @@ def view():
                     upnl_usdt=round(sum(r.get("upnl_usdt") or 0 for r in act if bool(r["dry"]) == dry), 2))
     pub = {k: v for k, v in s.items() if k not in ("salt",)}
     for r in rows:
-        try: n = json.loads(r.get("note") or "{}"); r["skip"] = n.get("skip"); r["error"] = n.get("error"); r["timeout"] = n.get("timeout")
+        try: n = json.loads(r.get("note") or "{}"); r["skip"] = n.get("skip"); r["error"] = n.get("error"); r["timeout"] = n.get("timeout"); r["bump"] = n.get("bump")
         except Exception: pass
     exs = []
     for n in X.NAMES:
         h = (_CL["ads"] or {}).get(n); h = h.health() if h else {}
-        exs.append(dict(name=n, label=X.LABEL[n], key_present=X.key_present(n), enabled=ex_on(s, n), primary=(s.get("primary_exchange") or "mexc") == n,
+        exs.append(dict(name=n, label=X.LABEL[n], key_present=X.key_present(n), enabled=ex_on(s, n), primary=exchanges_of(s)[0] == n,
                         healthy=h.get("ok"), checked_at=datetime.fromtimestamp(h["t"], timezone.utc).isoformat() if h.get("t") else None, why=h.get("why"),
                         perm_note=STATE["perm"].get(n)))
     for r in rows: r["exchange"] = exof(r)
-    return dict(settings=pub, key_present=M.key_present(), exchanges=exs, failover=failover_on(s), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"]) for k in STRATS],
+    pub["exchanges"] = exchanges_of(s); pub["primary_exchange"] = pub["exchanges"][0]   # primary_exchange: read-only, for old Mini App builds
+    return dict(settings=pub, key_present=M.key_present(), exchanges=exs, failover=failover_on(s), exchange_mode=",".join(exchanges_of(s)), exchange_mode_label=mode_label(s),
+                exchange_modes=[dict(value=",".join(m), label=EX_MODE_LABEL[m]) for m in EX_MODES], bump_cap_risk=round(bump_cap(s), 4), route=[X.LABEL[x] for x in route(s, {n: 1 for n in X.NAMES})], strategies=[dict(key=k, short=SG.short(k), tier=SG.status(k), on=k in s["strategies"]) for k in STRATS],
                 timeouts=list(TIMEOUTS), active=act, recent=[r for r in rows if r["status"] not in ACTIVE][:60], live=summ(False), dry=summ(True),
                 worker=dict(last_tick=STATE["last_tick"], last_result=STATE["last_result"], poll_s=POLL_S, errors=list(STATE["errors"])[-8:], skips=list(STATE["skips"])[-10:]),
                 exchange=dict(name=" → ".join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or "none", base=M.BASE,
-                              order_api="MEXC USDT-M perpetual (primary by default) · WEEX V3 USDT-M perpetual (fallback)"))
+                              order_api="MEXC USDT-M perpetual · WEEX V3 USDT-M perpetual · order: " + mode_label(s)))
 
 def panel_text():
     from .telegram import esc
@@ -677,12 +746,16 @@ def panel_text():
           f"limit at entry · market at {s['limit_timeout_min']} min if still ≤{MAX_SLIP_R:g}R away" if s["order_type"] == "limit_market" else
           "limit at entry · " + (f"cancel if not filled in {s['limit_timeout_min']} min" if s["limit_timeout_min"] else "no timeout"))
     lv = "MAX per coin (liq. kept beyond the stop)" if s.get("lev_mode") == "max" else f"≤ {s['leverage']}x"
-    pri = s.get("primary_exchange") or "mexc"; bk = [x for x in X.NAMES if x != pri][0]
-    def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · disabled")
-    L = ["🤖 <b>Auto-trade · MEXC futures + WEEX fallback</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
-         f"🏦 Primary <b>{X.LABEL[pri]}</b> · fallback <b>{X.LABEL[bk]}</b>: failover {'ON' if failover_on(s) else 'OFF'}" + ("" if s.get("failover") is not None else " (auto)"),
+    exl = exchanges_of(s)
+    def kl(n): return f"{X.LABEL[n]} key {'✅' if X.key_present(n) else '— not set'}" + ("" if ex_on(s, n) else " · not used")
+    emode = (f"<b>{X.LABEL[exl[0]]}</b> first, <b>{X.LABEL[exl[1]]}</b> as fallback" if len(exl) > 1 else f"<b>{X.LABEL[exl[0]]} only</b>")
+    nokey = [X.LABEL[x] for x in exl if not X.key_present(x)]
+    bcap = f"risk ≤ ${bump_cap(s):g}" + (" (auto 2× risk)" if not float(s.get("bump_max_risk_usdt") or 0) else "") + (f" · margin ≤ ${float(s['bump_max_margin_usdt']):g}" if float(s.get("bump_max_margin_usdt") or 0) else "")
+    L = ["🤖 <b>Auto-trade · MEXC + WEEX futures</b>", "━━━━━━━━━━━━━━", f"Status {st} · {md}",
+         f"🏦 Exchanges: <b>{esc(mode_label(s))}</b> · {emode}",
          f"🔑 {kl('mexc')} · {kl('weex')}",
-         f"↪️ Route: <b>{esc(' → '.join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or 'none')}</b>" + ("" if X.key_present("weex") else " <i>(WEEX skipped live until its key is set)</i>"),
+         f"↪️ Route: <b>{esc(' → '.join(X.LABEL[x] for x in route(dict(s, dry_run=True), {n: 1 for n in X.NAMES})) or 'none')}</b>" + (f" <i>({esc(', '.join(nokey))} skipped live until its API key is set)</i>" if nokey else ""),
+         f"⬆️ Min-order bump: <b>{'ON' if s.get('min_bump', True) else 'OFF'}</b>" + (f" · up to {esc(bcap)}, else skip" if s.get("min_bump", True) else " · below-minimum sizes are skipped"),
          f"💵 Risk <b>{s['risk_usdt']:g} USDT</b>/trade · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
          f"🧾 Order: {esc(ot)}",
          f"🧱 Max position size: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} <i>(caps qty × price per trade)</i> · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
@@ -693,7 +766,9 @@ def panel_text():
         L.append(f"📈 Open {b['open']} · pending {b['pending']} · today {b['today_usdt']:+.2f} · all {b['pnl_usdt']:+.2f} USDT ({b['closed']} closed)")
     for n, note in STATE["perm"].items(): L.append("⚠️ " + esc(note))
     L += ["", "<i>Signals and alerts are never paused or changed by auto-trade. Each trade stays on the exchange it was opened on.</i>",
-          "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> or <code>lev max</code> · <code>size 100</code> (max position size) · <code>dailyloss 20</code> (0 = off) · <code>sizeline on|off</code>"]
+          "Set numbers: <code>/autotrade risk 2</code> · <code>maxopen 3</code> · <code>lev 5</code> or <code>lev max</code> · <code>size 100</code> (max position size) · <code>dailyloss 20</code> (0 = off) · <code>sizeline on|off</code>",
+          "Exchanges: <code>/autotrade exchanges mexc</code> · <code>weex</code> · <code>mexc,weex</code> · <code>weex,mexc</code>",
+          "Min-order bump: <code>/autotrade minbump on|off</code> · <code>bumprisk 2</code> (max $ risk when bumped, 0 = auto 2× risk) · <code>bumpmargin 5</code> (max $ margin when bumped, 0 = off)"]
     return "\n".join(L)
 def panel_markup():
     s = settings(); B = lambda t, d: {"text": t, "callback_data": d}
@@ -704,13 +779,15 @@ def panel_markup():
     rows.append([B(("● " if s.get("lev_mode") != "max" else "") + f"Lev ≤{s['leverage']}x", "at:lv:cap"), B(("● " if s.get("lev_mode") == "max" else "") + "Lev MAX", "at:lv:max"),
                  B(("✅" if s.get("size_line", True) else "⬜") + " Size line", "at:sz")])
     rows.append([B(("● " if s["limit_timeout_min"] == t else "") + (f"{t} min" if t else "No timeout"), f"at:to:{t}") for t in (5, 10, 15, 0)])
-    pri = s.get("primary_exchange") or "mexc"
-    rows.append([B(f"🏦 Primary: {X.LABEL[pri]} ⇄", "at:px"), B(("✅" if failover_on(s) else "⬜") + " Failover", "at:fo")])
-    rows.append([B(("✅ " if ex_on(s, n) else "⬜ ") + X.LABEL[n], "at:x:" + n) for n in X.NAMES])
+    cur = tuple(exchanges_of(s))
+    em = [B(("● " if cur == m else "") + EX_MODE_LABEL[m], "at:em:" + ",".join(m)) for m in EX_MODES]
+    rows += [em[:2], em[2:]]
+    rows.append([B(("✅" if s.get("min_bump", True) else "⬜") + f" Min-order bump (≤ ${bump_cap(s):g} risk)", "at:mb")])
     rows.append([B("🛑 Flatten all…", "at:fl"), B("↻ Refresh", "at:rf")])
     return {"inline_keyboard": rows}
 NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt", "size": "max_notional_usdt",
-       "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min"}
+       "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min",
+       "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt"}
 def tg_command(text):
     """/autotrade [on|off|risk N|maxopen N|lev N|notional N|dailyloss N|timeout N] -> (reply text, markup or None)."""
     a = text.split()[1:]
@@ -721,11 +798,13 @@ def tg_command(text):
             elif w in NUM and len(a) > 1: save_settings({NUM[w]: a[1]})
             elif w in ("limit", "market", "limit_market", "limitmarket"): save_settings(dict(order_type="limit_market" if w.startswith("limit") and w != "limit" else w))
             elif w == "sizeline" and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(size_line=a[1].lower() == "on"))
+            elif w in ("exchanges", "exchange", "ex") and len(a) > 1: save_settings(dict(exchanges=",".join(a[1:])))
+            elif w in ("minbump", "bump") and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(min_bump=a[1].lower() == "on"))
             elif w == "primary" and len(a) > 1: save_settings(dict(primary_exchange=a[1].lower()))
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
             else: return ("Usage: /autotrade [on|off|limit|market|limit_market|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
-                          "primary mexc|weex|failover on|off|auto|mexc on|off|weex on|off]"), None
+                          "exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
 def tg_callback(data):
@@ -734,7 +813,7 @@ def tg_callback(data):
     if d == "en": s = save_settings(dict(enabled=not s["enabled"])); return ("Auto-trade " + ("ON" if s["enabled"] else "OFF")), panel_text(), panel_markup(), None
     if d == "dr":
         if s["dry_run"]:
-            if not any(X.key_present(x) for x in X.NAMES if ex_on(s, x)): return "Add an exchange key on the server first", panel_text(), panel_markup(), None
+            if not any(X.key_present(x) for x in exchanges_of(s)): return "Add an exchange key on the server first", panel_text(), panel_markup(), None
             return "Confirm below", None, None, ("⚠️ <b>Go LIVE?</b> Auto-trade will place REAL futures orders with your key(s): " + " → ".join(X.LABEL[x] for x in route(dict(s, dry_run=False), {n: 1 for n in X.NAMES})) + ".",
                                                  {"inline_keyboard": [[{"text": "✅ Yes, go LIVE", "callback_data": "at:live"}, {"text": "Cancel", "callback_data": "at:no"}]]})
         save_settings(dict(dry_run=True)); return "Dry-run on", panel_text(), panel_markup(), None
@@ -746,8 +825,11 @@ def tg_callback(data):
         k = d[2:]; cur = list(s["strategies"]); cur = [x for x in cur if x != k] if k in cur else cur + [k]
         save_settings(dict(strategies=cur)); return f"{k} {'on' if k in cur else 'off'}", panel_text(), panel_markup(), None
     try:
-        if d == "px": s = save_settings(dict(primary_exchange=[x for x in X.NAMES if x != (s.get("primary_exchange") or "mexc")][0])); return "Primary: " + X.LABEL[s["primary_exchange"]], panel_text(), panel_markup(), None
-        if d == "fo": s = save_settings(dict(failover=not failover_on(s))); return "Failover " + ("ON" if s["failover"] else "OFF"), panel_text(), panel_markup(), None
+        if d.startswith("em:"): s = save_settings(dict(exchanges=d[3:])); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
+        if d == "mb": s = save_settings(dict(min_bump=not s.get("min_bump", True))); return "Min-order bump " + ("ON" if s["min_bump"] else "OFF"), panel_text(), panel_markup(), None
+        # legacy buttons (panels sent before 2026-11-10)
+        if d == "px": s = save_settings(dict(primary_exchange=[x for x in X.NAMES if x != exchanges_of(s)[0]][0])); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
+        if d == "fo": s = save_settings(dict(failover=not failover_on(s))); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
         if d.startswith("x:") and d[2:] in X.NAMES: n = d[2:]; save_settings(dict(ex_on={n: not ex_on(s, n)})); return f"{X.LABEL[n]} {'on' if ex_on(settings(0), n) else 'off'}", panel_text(), panel_markup(), None
     except ValueError as e: return str(e)[:190], None, None, None
     if d.startswith("lv:"): save_settings(dict(lev_mode=d[3:])); return "Leverage: " + ("MAX" if d[3:] == "max" else f"≤{s['leverage']}x"), panel_text(), panel_markup(), None

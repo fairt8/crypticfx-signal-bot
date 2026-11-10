@@ -518,19 +518,35 @@ def test_weex_is_last_unavailable_everywhere_is_recorded(monkeypatch, fresh):
     assert len([x for x in rows() if x["ref_id"] == r["ref_id"]]) == 1        # one row per signal
 
 def test_no_failover_back_when_weex_state_unknown(monkeypatch, fresh):
-    both_live(monkeypatch); A.save_settings(dict(primary_exchange="weex")); sig(); fk, fw = Fake(), FakeWeex()
+    both_live(monkeypatch); A.save_settings(dict(exchanges="weex,mexc")); sig(); fk, fw = Fake(), FakeWeex()
     fw.fail_create = requests.exceptions.ReadTimeout("read timed out")
     A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100500.0)); r = rows()[0]
     assert r["exchange"] == "weex" and r["status"] == "placing" and fk.n("create_order") == 0 and any("WEEX order state unknown" in t for t in fresh)
 
-def test_failover_off_or_no_weex_key(monkeypatch):
-    both_live(monkeypatch); A.save_settings(dict(failover=False)); sig(); fk, fw = DownMexc(), FakeWeex()
+def test_single_exchange_mode_or_no_weex_key(monkeypatch):
+    both_live(monkeypatch); A.save_settings(dict(exchanges="mexc")); sig(); fk, fw = DownMexc(), FakeWeex()
     A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100500.0)); r = rows()[0]
-    assert r["status"] == "skipped" and "health check failed" in json.loads(r["note"])["skip"] and fw.calls == []
-    A.save_settings(dict(failover=None)); monkeypatch.setattr(WX, "key_present", lambda: False)   # auto = on only with WEEX keys
-    assert A.failover_on(A.settings(0)) is False and A.route(A.settings(0), {"mexc": 1, "weex": 1}) == ["mexc"]
-    A.save_settings(dict(failover=True)); assert A.route(A.settings(0), {"mexc": 1, "weex": 1}) == ["mexc"]   # live: WEEX inert without its keys
+    assert r["status"] == "skipped" and "health check failed" in json.loads(r["note"])["skip"] and fw.calls == []   # MEXC only: never WEEX
+    A.save_settings(dict(exchanges="mexc,weex")); monkeypatch.setattr(WX, "key_present", lambda: False)
+    assert A.failover_on(A.settings(0)) and A.route(A.settings(0), {"mexc": 1, "weex": 1}) == ["mexc"]   # live: WEEX inert without its keys
     assert A.route(dict(A.settings(0), dry_run=True), {"mexc": 1, "weex": 1}) == ["mexc", "weex"]
+    A.save_settings(dict(exchanges="weex")); assert A.route(A.settings(0), {"mexc": 1, "weex": 1}) == []
+    sig(symbol="SOLUSDT", entry=150, sl=148, tp=156); A.tick(cl={"mexc": Fake(), "weex": fw}, px_fn=PX(150.2))
+    r = [x for x in rows() if x["symbol"] == "SOLUSDT"][0]; assert r["status"] == "skipped" and "API key" in json.loads(r["note"])["skip"]
+
+def test_weex_only_and_weex_first_modes(monkeypatch, fresh):
+    both_live(monkeypatch); A.save_settings(dict(exchanges="weex")); sig(); fk, fw = Fake(), FakeWeex()
+    A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100500.0)); r = rows()[0]
+    assert r["exchange"] == "weex" and r["status"] == "open_order" and creates(fk) == [] and creates(fw)[0]["quantity"] == "0.01"
+    A.save_settings(dict(exchanges="weex,mexc")); sig(symbol="ONLYMXUSDT", entry=1.0, sl=0.9, tp=1.3)   # not on WEEX -> MEXC fallback
+    CON["ONLYMX_USDT"] = dict(symbol="ONLYMX_USDT", contractSize=1, priceUnit=0.0001, priceScale=4, volUnit=1, volScale=0, minVol=1, maxVol=10**7, maxLeverage=50, apiAllowed=True, state=0)
+    try:
+        A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(1.01)); r = rows()[-1]
+        assert r["exchange"] == "mexc" and r["symbol"] == "ONLYMXUSDT" and len(creates(fk)) == 1 and any("not listed on WEEX" in t for t in fresh)
+    finally: CON.pop("ONLYMX_USDT")
+    fw2 = FakeWeex(); fw2.fail_create = requests.exceptions.ReadTimeout("read timed out"); fk2 = Fake(); sig(symbol="SOLUSDT", entry=150, sl=148, tp=156)
+    A.tick(cl={"mexc": fk2, "weex": fw2}, px_fn=PX(150.2)); r = rows()[-1]
+    assert r["exchange"] == "weex" and r["status"] == "placing" and creates(fk2) == []   # unknown state on the first: never the second
 
 def test_weex_key_needs_all_three_env_vars(monkeypatch):
     for k in WX.ENV: monkeypatch.setenv(k, "x")
@@ -584,37 +600,59 @@ def test_mexc_700007_balance_permission_note(monkeypatch, fresh):
     with pytest.raises(M.NoPermission): M.Client(key="a", secret="b")._parse(R())
 
 def test_dry_run_failover_uses_no_private_calls(monkeypatch):
-    enable(); A.save_settings(dict(failover=True)); sig(); fk, fw = DownMexc(private_ok=False), FakeWeex(private_ok=False)
+    enable(); A.save_settings(dict(exchanges="mexc,weex")); sig(); fk, fw = DownMexc(private_ok=False), FakeWeex(private_ok=False)
     A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100500.0)); r = rows()[0]
     assert r["exchange"] == "weex" and r["dry"] == 1 and r["vol"] == 0.01 and fw.calls == [] and fk.calls == []
 
 def test_exchange_settings_and_panel(monkeypatch):
-    s = A.settings(0); assert s["primary_exchange"] == "mexc" and s["failover"] is None and s["enabled"] is False and s["dry_run"] is True
-    assert X.NAMES == ("mexc", "weex") and s["ex_on"] == {"mexc": True, "weex": True}
-    with pytest.raises(ValueError): A.save_settings(dict(primary_exchange="binance"))
+    s = A.settings(0); assert s["exchanges"] == ["mexc", "weex"] and s["enabled"] is False and s["dry_run"] is True
+    assert X.NAMES == ("mexc", "weex") and not any(k in s for k in A.LEGACY_EX)
+    for bad in ("binance", "bybit", "mexc,mexc", "", "mexc,bybit"):
+        with pytest.raises(ValueError): A.save_settings(dict(exchanges=bad))
     with pytest.raises(ValueError): A.save_settings(dict(primary_exchange="bybit"))
     with pytest.raises(ValueError): A.save_settings(dict(ex_on={"bybit": True}))
     with pytest.raises(ValueError): A.save_settings(dict(ex_on={"mexc": False, "weex": False}))
-    A.tg_callback("at:px"); assert A.settings(0)["primary_exchange"] == "weex"
-    A.tg_command("/autotrade primary mexc"); A.tg_command("/autotrade failover off"); A.tg_command("/autotrade weex off")
-    s = A.settings(0); assert s["primary_exchange"] == "mexc" and s["failover"] is False and s["ex_on"] == {"mexc": True, "weex": False}
-    A.tg_callback("at:x:weex"); A.tg_callback("at:fo"); s = A.settings(0); assert s["ex_on"]["weex"] and s["failover"] is True
-    t, mk = A.tg_command("/autotrade"); assert "WEEX" in t and "Bybit" not in t and "MEXC → WEEX" in t and any(b["callback_data"] == "at:fo" for row in mk["inline_keyboard"] for b in row)
-    assert any(b["callback_data"] == "at:x:weex" for row in mk["inline_keyboard"] for b in row) and not any("bybit" in b["callback_data"] for row in mk["inline_keyboard"] for b in row)
-    assert "Usage" in A.tg_command("/autotrade bybit on")[0] and A.settings(0)["ex_on"] == {"mexc": True, "weex": True}
+    for cmd, want in (("weex", ["weex"]), ("mexc", ["mexc"]), ("weex,mexc", ["weex", "mexc"]), ("mexc,weex", ["mexc", "weex"]), ("both", ["mexc", "weex"]), ("weex mexc", ["weex", "mexc"])):
+        t, mk = A.tg_command("/autotrade exchanges " + cmd); assert A.settings(0)["exchanges"] == want, cmd
+    assert "⚠️" in A.tg_command("/autotrade exchanges binance")[0] and A.settings(0)["exchanges"] == ["weex", "mexc"]   # unchanged
+    for cb, want in (("at:em:weex", ["weex"]), ("at:em:weex,mexc", ["weex", "mexc"]), ("at:em:mexc", ["mexc"]), ("at:em:mexc,weex", ["mexc", "weex"])):
+        A.tg_callback(cb); assert A.settings(0)["exchanges"] == want, cb
+    # old commands / buttons keep working
+    A.tg_callback("at:px"); assert A.settings(0)["exchanges"] == ["weex", "mexc"]
+    A.tg_command("/autotrade primary mexc"); assert A.settings(0)["exchanges"] == ["mexc", "weex"]
+    A.tg_command("/autotrade failover off"); assert A.settings(0)["exchanges"] == ["mexc"]
+    A.tg_command("/autotrade failover on"); assert A.settings(0)["exchanges"] == ["mexc", "weex"]
+    A.tg_command("/autotrade weex off"); assert A.settings(0)["exchanges"] == ["mexc"]
+    A.tg_callback("at:x:weex"); assert A.settings(0)["exchanges"] == ["mexc", "weex"]
+    A.tg_command("/autotrade primary weex"); A.tg_command("/autotrade mexc off"); assert A.settings(0)["exchanges"] == ["weex"]
+    A.tg_command("/autotrade primary mexc"); assert A.settings(0)["exchanges"] == ["mexc"]       # single mode: switches the exchange
+    A.tg_callback("at:fo"); assert A.settings(0)["exchanges"] == ["mexc", "weex"]
+    t, mk = A.tg_command("/autotrade"); assert "WEEX" in t and "Bybit" not in t and "MEXC → WEEX" in t and "exchanges mexc" in t
+    cbs = [b["callback_data"] for row in mk["inline_keyboard"] for b in row]
+    assert {"at:em:mexc", "at:em:weex", "at:em:mexc,weex", "at:em:weex,mexc", "at:mb"} <= set(cbs) and not any("bybit" in c for c in cbs)
+    assert "Usage" in A.tg_command("/autotrade bybit on")[0] and A.settings(0)["exchanges"] == ["mexc", "weex"]
     assert A.settings(0)["enabled"] is False and A.settings(0)["dry_run"] is True   # exchange controls never switch auto-trade on
     monkeypatch.setattr(A, "prices", lambda syms: {}); v = A.view()
     assert [e["name"] for e in v["exchanges"]] == ["mexc", "weex"] and v["route"] == ["MEXC", "WEEX"] and v["exchange"]["name"] == "MEXC → WEEX"
+    assert v["exchange_mode"] == "mexc,weex" and [m["value"] for m in v["exchange_modes"]] == ["mexc", "weex", "mexc,weex", "weex,mexc"]
+    A.save_settings(dict(exchanges="weex")); v = A.view()
+    assert v["exchange_mode_label"] == "WEEX only" and [e["primary"] for e in v["exchanges"]] == [False, True] and v["settings"]["primary_exchange"] == "weex"
 
-def test_saved_bybit_settings_migrate_to_weex_without_enabling():
-    db.kv_set(A.KEY, json.dumps(dict(enabled=False, dry_run=True, primary_exchange="bybit", ex_on={"mexc": True, "bybit": False}, failover=None)))
-    A._S.update(t=0, v=None); s = A.settings(0)
-    assert s["primary_exchange"] == "weex" and s["ex_on"] == {"mexc": True, "weex": False} and "bybit" not in json.dumps(s["ex_on"])
-    assert s["enabled"] is False and s["dry_run"] is True
+def test_saved_legacy_exchange_settings_migrate_without_enabling():
+    def load(d): db.kv_set(A.KEY, json.dumps(d)); A._S.update(t=0, v=None); return A.settings(0)
+    s = load(dict(enabled=False, dry_run=True, primary_exchange="mexc", failover=None, ex_on={"mexc": True, "weex": True}, risk_usdt=1.0))
+    assert s["exchanges"] == ["mexc", "weex"] and s["enabled"] is False and s["dry_run"] is True and s["risk_usdt"] == 1.0   # the live VM's shape
     s = A.save_settings(dict(risk_usdt=2)); saved = json.loads(db.kv_get(A.KEY))
-    assert saved["primary_exchange"] == "weex" and saved["ex_on"] == {"mexc": True, "weex": False} and saved["enabled"] is False and saved["dry_run"] is True
-    db.kv_set(A.KEY, json.dumps(dict(primary_exchange="mexc", ex_on={"mexc": True, "bybit": True}))); A._S.update(t=0, v=None)
-    assert A.settings(0)["ex_on"] == {"mexc": True, "weex": True}
+    assert saved["exchanges"] == ["mexc", "weex"] and not any(k in saved for k in A.LEGACY_EX) and saved["enabled"] is False and saved["dry_run"] is True
+    assert load(dict(primary_exchange="mexc", failover=False))["exchanges"] == ["mexc"]
+    assert load(dict(primary_exchange="weex", failover=True))["exchanges"] == ["weex", "mexc"]
+    assert load(dict(primary_exchange="mexc", ex_on={"mexc": True, "weex": False}))["exchanges"] == ["mexc"]
+    assert load(dict(primary_exchange="mexc", ex_on={"mexc": False, "weex": True}))["exchanges"] == ["weex"]
+    s = load(dict(enabled=False, dry_run=True, primary_exchange="bybit", ex_on={"mexc": True, "bybit": False}, failover=None))
+    assert s["exchanges"] == ["mexc"] and "bybit" not in json.dumps(s) and s["enabled"] is False and s["dry_run"] is True
+    assert load(dict(primary_exchange="mexc", ex_on={"mexc": True, "bybit": True}))["exchanges"] == ["mexc", "weex"]
+    assert load({})["exchanges"] == ["mexc", "weex"] and load(dict(exchanges=["bogus"]))["exchanges"] == ["mexc", "weex"]
+    assert load(dict(exchanges=["weex"], primary_exchange="mexc"))["exchanges"] == ["weex"]   # new key wins
 
 def test_bybit_fully_removed():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -740,3 +778,96 @@ def test_size_line_on_don_entry(monkeypatch, fresh):
 def test_sizing_module_is_pure():
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "sizing.py")).read()
     for mod in ("import requests", "autotrade import", "from . import autotrade", "mexc", "bybit", "weex", "exchanges", "telegram"): assert mod not in src, mod
+
+
+# =================== t156u: minimum-order bump (cap) + exchange mode ===================
+SMALL = dict(symbol="SMALL_USDT", contractSize=1, priceUnit=0.0001, priceScale=4, volUnit=1, volScale=0, minVol=10, maxVol=10**7, maxLeverage=50, apiAllowed=True, state=0)
+def test_size_min_order_bump_math():
+    c = CON["BTC_USDT"]                                               # min 1 contract = 0.0001 BTC; at a 1000 stop that is $0.10 risk
+    with pytest.raises(M.MinSize): M.size(c, 100000, 99000, 0.05)                          # bump off (default in M.size)
+    z = M.size(c, 100000, 99000, 0.05, bump=True)                                          # $0.10 <= auto cap 2 x 0.05
+    assert z["vol"] == 1 and abs(z["risk"] - 0.1) < 1e-9 and z["bump"]["from_vol"] == 0.5 and z["bump"]["to_vol"] == 1 and z["bump"]["auto"] and z["bump"]["cap_risk"] == 0.1
+    with pytest.raises(M.MinSize) as e: M.size(c, 100000, 99000, 0.04, bump=True)          # $0.10 > 2 x 0.04
+    assert "bump cap $0.08" in str(e.value) and "2× risk" in str(e.value)
+    assert M.size(c, 100000, 99000, 0.04, bump=True, bump_max_risk=0.5)["vol"] == 1        # explicit cap
+    with pytest.raises(M.MinSize) as e: M.size(c, 100000, 99000, 0.04, max_notional=5, bump=True, bump_max_risk=1)
+    assert "max position size" in str(e.value)                                              # 1 contract = $10 > $5 cap
+    z = M.size(c, 100000, 99000, 10, bump=True); assert z["vol"] == 100 and z["bump"] is None   # above the minimum: untouched
+    mn = dict(c, minNotional=20.0)                                                          # min notional: 2 contracts ($20)
+    z = M.size(mn, 100000, 99000, 0.15, bump=True); assert z["vol"] == 2 and abs(z["risk"] - 0.2) < 1e-9 and z["bump"]["to_risk"] == 0.2
+    assert M.min_vol(SMALL, 1.0) == 10 and M.ceil_vol(10.01, SMALL) == 11
+    w = X.Weex(FakeWeex()).instrument("SOLUSDT"); z = M.size(w, 10, 9, 0.05, bump=True)     # WEEX min 0.1 SOL = $0.10 risk
+    assert z["vol"] == 0.1 and z["bump"]["unit"] == "qty"
+
+@pytest.fixture
+def small():
+    """SMALLUSDT: MEXC min 10 contracts of 1 coin, WEEX min 5 coins. Entry 1.0 / stop 0.9 -> MEXC min = $1.00 risk, WEEX min = $0.50."""
+    CON["SMALL_USDT"] = SMALL; WXI["SMALLUSDT"] = dict(WXI["ONLYWXUSDT"], symbol="SMALLUSDT", minOrderSize=5); WXAPI.add("SMALLUSDT")
+    yield
+    CON.pop("SMALL_USDT", None); WXI.pop("SMALLUSDT", None); WXAPI.discard("SMALLUSDT")
+def ssig(**kw): return sig(symbol="SMALLUSDT", entry=1.0, sl=0.9, tp=1.3, **kw)
+def srow(): return [x for x in rows() if x["symbol"] == "SMALLUSDT"][-1]
+
+def test_dry_run_bump_alert_shows_original_and_bumped(fresh, small):
+    enable(risk_usdt=0.5); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01)); r = srow()
+    assert r["status"] == "open_order" and r["vol"] == 10 and abs(r["risk_usdt"] - 1.0) < 1e-9 and json.loads(r["note"])["bump"]["from_risk"] == 0.5
+    t = [x for x in fresh if "Min-order bump" in x][-1]
+    assert "5 → 10 ct" in t and "$0.50 → <b>$1.00</b>" in t and "cap $1 = 2× risk" in t and "limit placed" in t
+    monkeypatch_prices = A.prices; A.prices = lambda syms: {}
+    try: v = A.view(); assert v["recent"] == [] and v["active"][0]["bump"]["to_vol"] == 10
+    finally: A.prices = monkeypatch_prices
+
+def test_bump_over_cap_is_skipped_with_alert_and_tries_next_exchange(fresh, small):
+    enable(risk_usdt=0.4, exchanges="mexc"); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01)); r = srow()     # MEXC min $1.00 > auto cap $0.80
+    assert r["status"] == "skipped" and "bump cap $0.8" in json.loads(r["note"])["skip"] and any("skipped (minimum order)" in t and "bump cap $0.8" in t for t in fresh)
+    A.save_settings(dict(exchanges="mexc,weex")); fw = FakeWeex(private_ok=False); ssig()                   # WEEX min $0.50 fits -> WEEX takes it
+    A.tick(cl={"mexc": Fake(False), "weex": fw}, px_fn=PX(1.01)); r = srow()
+    assert r["exchange"] == "weex" and r["status"] == "open_order" and r["vol"] == 5 and fw.calls == []
+    assert any("Backup exchange" in t and "bump cap" in t and "Min-order bump</b> on WEEX" in t and "4 → 5 qty" in t for t in fresh)
+    with db.conn() as c: c.execute("UPDATE autotrade SET status='cancelled'")                               # free the coin (one auto trade per coin)
+    A.save_settings(dict(bump_max_risk_usdt=0.45)); ssig()                                                  # neither fits
+    A.tick(cl={"mexc": Fake(False), "weex": fw}, px_fn=PX(1.01)); r = srow(); n = json.loads(r["note"])["skip"]
+    assert r["status"] == "skipped" and "MEXC" in n and "WEEX" in n and "$0.45" in n
+
+def test_bump_off_skips_below_minimum(fresh, small):
+    enable(risk_usdt=0.5, exchanges="mexc"); A.tg_command("/autotrade minbump off"); assert A.settings(0)["min_bump"] is False
+    ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01)); r = srow()
+    assert r["status"] == "skipped" and "bump is off" in json.loads(r["note"])["skip"] and any("skipped (minimum order)" in t for t in fresh)
+
+def test_bump_margin_cap_and_balance(monkeypatch, small):
+    enable(risk_usdt=0.5, leverage=1, bump_max_margin_usdt=5, exchanges="mexc"); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01))
+    r = srow(); assert r["status"] == "skipped" and "margin cap $5" in json.loads(r["note"])["skip"]       # 10 ct = $10 at 1x
+    A.save_settings(dict(leverage=5)); ssig(); A.tick(cl=Fake(False), px_fn=PX(1.01))                       # $2 margin at 5x
+    r = srow(); assert r["status"] == "open_order" and r["vol"] == 10
+    class Poor(Fake):
+        def usdt_available(self): self._p("usdt_available"); return 1.0
+    monkeypatch.setattr(M, "key_present", lambda: True); A.save_settings(dict(dry_run=False, max_open=5))
+    with db.conn() as c: c.execute("UPDATE autotrade SET status='cancelled'")
+    ssig(); fk = Poor(); A.tick(cl={"mexc": fk}, px_fn=PX(1.01)); r = srow()
+    assert r["status"] == "skipped" and "bumped minimum order" in json.loads(r["note"])["skip"] and fk.n("create_order") == 0
+
+def test_live_bumped_order_and_fill_alert(monkeypatch, fresh, small):
+    live(monkeypatch, risk_usdt=0.5, order_type="market", bump_max_risk_usdt=1.5); ssig(status="open"); fk = Fake()
+    A.tick(cl=fk, px_fn=PX(1.01)); (b,) = creates(fk)
+    assert b["vol"] == 10 and b["symbol"] == "SMALL_USDT" and any("Min-order bump" in t and "order placed" in t for t in fresh)
+    fk.positions = [dict(symbol="SMALL_USDT", positionType=1, holdVol=10, positionId=1)]
+    A.tick(cl=fk, px_fn=PX(1.01)); assert srow()["status"] == "filled" and any("filled" in t and "Min-order bump" in t for t in fresh)
+
+def test_limit_to_market_skips_when_bump_over_cap_at_live_price(fresh, small):
+    enable(order_type="limit_market", limit_timeout_min=5, risk_usdt=0.5, exchanges="mexc"); ssig(); now = datetime.now(timezone.utc)
+    A.tick(cl=Fake(False), px_fn=PX(1.01), now=now); assert srow()["status"] == "open_order" and srow()["vol"] == 10
+    A.tick(cl=Fake(False), px_fn=PX(1.02), now=now + timedelta(minutes=6)); r = srow()     # at 1.02 the 10-ct minimum risks $1.20 > $1 cap
+    assert r["status"] == "cancelled" and "no market entry" in r["exit_reason"] and "bump cap" in r["exit_reason"]
+
+def test_bump_commands_panel_and_validation():
+    A.tg_command("/autotrade bumprisk 2"); A.tg_command("/autotrade bumpmargin 5"); s = A.settings(0)
+    assert s["bump_max_risk_usdt"] == 2 and s["bump_max_margin_usdt"] == 5 and s["min_bump"] is True
+    t, mk = A.tg_command("/autotrade"); assert "Min-order bump: <b>ON</b>" in t and "risk ≤ $2" in t and "margin ≤ $5" in t
+    A.tg_callback("at:mb"); assert A.settings(0)["min_bump"] is False; A.tg_callback("at:mb"); assert A.settings(0)["min_bump"] is True
+    A.tg_command("/autotrade bumprisk 0"); assert A.bump_cap(A.settings(0)) == 2 * A.settings(0)["risk_usdt"] and "auto 2× risk" in A.panel_text()
+    assert "⚠️" in A.tg_command("/autotrade bumprisk -1")[0]
+    with pytest.raises(ValueError): A.save_settings(dict(bump_max_margin_usdt="x"))
+    s = A.settings(0); assert s["enabled"] is False and s["dry_run"] is True
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
+    assert "min_bump" in src and "bump_max_risk_usdt" in src and "exchange_modes" in src and "atSet({exchanges:" in src
+

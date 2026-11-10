@@ -11,7 +11,7 @@ Official docs (checked 2026-11-09): https://www.mexc.com/api-docs/futures/integr
     type 1 limit / 5 market, openType 1 isolated, vol = number of contracts (contractSize base units each).
 Keys come from the environment only (MEXC_API_KEY / MEXC_API_SECRET); they are never logged, returned or stored."""
 import hashlib, hmac, json, os, threading, time
-from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 from urllib.parse import urlencode
 import requests
 
@@ -25,6 +25,9 @@ class NoPermission(MexcError):
     """The API key lacks a permission for this endpoint (MEXC 700007, e.g. "View Account Details" for balances)."""
 class Skip(Exception):
     """A signal that can't be traded (reason in str(e)); not an error."""
+class MinSize(Skip):
+    """The size from the user's settings is below the exchange minimum and the min-order bump is off or would exceed its cap.
+    Nothing was sent, so the next exchange in the route (if any) may still take the signal."""
 class NotListed(Skip):
     """The symbol is not tradable by API on this exchange (not listed / API not allowed / not enabled) -> backup may take it."""
 PERM_CODES = (700007,)
@@ -51,29 +54,55 @@ def floor_vol(v, c):
     q = (_d(v) / unit).quantize(Decimal(1), rounding=ROUND_FLOOR) * unit
     return float(q.quantize(Decimal(1).scaleb(-int(c.get("volScale") or 0)), rounding=ROUND_FLOOR))
 
-def size(c, entry, sl, risk_usdt, max_notional=0.0, lev_cap=5):
-    """Position size from the stop distance. Returns dict(vol, qty, notional, leverage, risk, margin) or raises Skip.
+def ceil_vol(v, c):
+    """Round a contract quantity UP to the volume step (used only for the minimum-order bump)."""
+    unit = _d(c.get("volUnit") or 1)
+    q = (_d(v) / unit).quantize(Decimal(1), rounding=ROUND_CEILING) * unit
+    return float(q.quantize(Decimal(1).scaleb(-int(c.get("volScale") or 0)), rounding=ROUND_CEILING))
+def min_vol(c, entry):
+    """Smallest order the exchange accepts for this contract at `entry`: max(minVol, one step, minNotional / value per unit), on the step."""
+    cs = float(c.get("contractSize") or 0); v = max(float(c.get("minVol") or 0), float(c.get("volUnit") or 0))
+    mnn = float(c.get("minNotional") or 0)
+    if mnn and cs > 0 and entry > 0: v = max(v, mnn / (float(entry) * cs))
+    return ceil_vol(v, c)
+BUMP_AUTO_X = 2.0   # bump cap when bump_max_risk is 0 (auto): 2 x the configured risk per trade
+
+def size(c, entry, sl, risk_usdt, max_notional=0.0, lev_cap=5, bump=False, bump_max_risk=0.0):
+    """Position size from the stop distance. Returns dict(vol, qty, notional, leverage, risk, margin, bump) or raises Skip.
     qty (base units) = risk / |entry - sl|; vol (contracts) = qty / contractSize rounded DOWN to the step (never more risk
-    than asked); optional max notional caps it further. Leverage = min(cap, contract max); margin = notional / leverage."""
+    than asked); optional max notional caps it further. Leverage = min(cap, contract max); margin = notional / leverage.
+    Minimum-order bump (user 2026-11-10): if that size is below the exchange minimum (minVol / step / minNotional) and
+    `bump` is on, the order is rounded UP to the minimum, but only if its risk at this stop stays <= bump_max_risk
+    (0 = auto, BUMP_AUTO_X x risk_usdt) and its value stays <= max_notional (when set). Otherwise MinSize (skip)."""
     entry, sl, risk_usdt = float(entry), float(sl), float(risk_usdt)
     dist = abs(entry - sl)
     if dist <= 0 or entry <= 0: raise Skip("stop distance is zero")
     cs = float(c.get("contractSize") or 0)
     if cs <= 0: raise Skip("contract size unknown")
-    vol = floor_vol(risk_usdt / dist / cs, c)
+    raw = risk_usdt / dist / cs
+    if max_notional and max_notional > 0: raw = min(raw, max_notional / (entry * cs))
+    vol = floor_vol(raw, c)
     if max_notional and max_notional > 0:
         vol = min(vol, floor_vol(max_notional / (entry * cs), c))
     mn = float(c.get("minVol") or 0); ex = c.get("_ex") or "MEXC"; unit = "contract" if ex == "MEXC" else "qty"
-    if vol <= 0 or vol < mn:
-        raise Skip(f"risk ${risk_usdt:g} is below {ex}'s minimum size ({mn:g} {unit} = ${mn*cs*dist:.2f} risk at this stop)")
-    mnn = float(c.get("minNotional") or 0)
-    if mnn and vol * cs * entry < mnn:
-        raise Skip(f"order value ${vol*cs*entry:.2f} is below {ex}'s minimum (${mnn:g}); raise the risk per trade")
+    mnn = float(c.get("minNotional") or 0); bumped = None
+    if vol <= 0 or vol < mn or (mnn and vol * cs * entry < mnn):
+        vm = min_vol(c, entry); need_risk = vm * cs * dist; need_val = vm * cs * entry
+        if not bump:
+            if mnn and vol > 0 and vol >= mn: raise MinSize(f"order value ${vol*cs*entry:.2f} is below {ex}'s minimum (${mnn:g}); raise the risk per trade or turn the min-order bump on")
+            raise MinSize(f"risk ${risk_usdt:g} is below {ex}'s minimum size ({vm:g} {unit} = ${need_risk:.2f} risk at this stop); min-order bump is off")
+        auto = not (bump_max_risk and float(bump_max_risk) > 0); cap = BUMP_AUTO_X * risk_usdt if auto else float(bump_max_risk)
+        if need_risk > cap + 1e-9:
+            raise MinSize(f"{ex} minimum order {vm:g} {unit} = ${need_risk:.2f} risk at this stop, above the bump cap ${cap:g}" + (f" ({BUMP_AUTO_X:g}× risk)" if auto else ""))
+        if max_notional and max_notional > 0 and need_val > float(max_notional) + 1e-9:
+            raise MinSize(f"{ex} minimum order {vm:g} {unit} = ${need_val:.2f} position, above your max position size ${max_notional:g}")
+        bumped = dict(from_vol=float(f"{raw:.6g}"), from_risk=round(raw * cs * dist, 4), to_vol=vm, to_risk=round(need_risk, 4), cap_risk=round(cap, 4), auto=auto, unit=unit)
+        vol = vm
     mx = float(c.get("maxVol") or 0)
     if mx and vol > mx: vol = floor_vol(mx, c)
     lev = int(max(1, min(int(lev_cap or 1), int(c.get("maxLeverage") or lev_cap or 1))))
     notional = vol * cs * entry
-    return dict(vol=vol, qty=vol * cs, notional=round(notional, 4), leverage=lev, risk=round(vol * cs * dist, 4), margin=round(notional / lev, 4))
+    return dict(vol=vol, qty=vol * cs, notional=round(notional, 4), leverage=lev, risk=round(vol * cs * dist, 4), margin=round(notional / lev, 4), bump=bumped)
 
 class Client:
     """Thin REST client. `session` is injectable (tests use a mock). Private calls need MEXC_API_KEY/MEXC_API_SECRET."""
