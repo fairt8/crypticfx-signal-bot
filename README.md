@@ -1,6 +1,9 @@
 # FVG Signal Bot (v1)
 Crypto + forex signal generator implementing `strategy-spec.md`: 4H fair value gap (bias) → price taps it → first same-direction 5m FVG → limit entry at the 5m FVG edge, stop beyond the 3 FVG candles, target = 3× risk. Web dashboard + Telegram bot + optional AI explanations. **Educational, not financial advice.**
 
+## Project guide
+A project-by-project status guide (what each part produces, what "complete" means, and the to-do list) is in [docs/PROJECTS_GUIDE.md](docs/PROJECTS_GUIDE.md). A printable copy is [docs/CrypticFx-Guide.pdf](docs/CrypticFx-Guide.pdf).
+
 ## Run locally
 ```bash
 pip install -r requirements.txt
