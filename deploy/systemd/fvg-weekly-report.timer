@@ -1,0 +1,13 @@
+# Mondays at 09:53 Africa/Lagos (WAT, UTC+1). Zone is named explicitly so the
+# time stays correct even if the host timezone is UTC.
+[Unit]
+Description=CrypticFx weekly strategy report timer
+
+[Timer]
+OnCalendar=Mon *-*-* 09:53:00 Africa/Lagos
+AccuracySec=1min
+Persistent=true
+Unit=fvg-weekly-report.service
+
+[Install]
+WantedBy=timers.target

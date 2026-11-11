@@ -24,6 +24,9 @@ uvicorn app.web:app --port 8000          # dashboard at http://localhost:8000, s
 | app/telegram.py | posts signals; /signals /history [days] /stats /explain id /ask question /start |
 | app/ai.py | OpenAI-compatible chat; off when `LLM_API_KEY` is empty |
 | app/web.py + desk.html | FastAPI: `/` (signal desk: equity in $/R, positions, alerts, PnL), `/api/desk` (cached 60s), `/api/signals?days=30`, `/api/stats`, `POST /api/scan`, `/api/explain/{id}`, `POST /api/chat` |
+| app/weekly_report.py | Weekly strategy report (past week + all-time stats from the DB, unprofitable note); `python -m app.weekly_report`. Posted to the owner Telegram chat |
+| app/backtest_all.py | Monthly all-strategy backtest (default ≥ 3 years) with a Telegram summary; `python -m app.backtest_all` |
+| deploy/systemd/ | systemd service/timer units for the weekly report and monthly backtest |
 
 ## Confidence score (heuristic, not a probability)
 Base 45 when the core rules are met, then: 4H EMA50/200 trend +7 · 4H HH/HL structure +7 (−5 if against) · FVG at swing S/R +6 · 5m RSI not stretched +4 (−4) · MACD histogram agrees +5 · candlestick pattern (engulfing, hammer, star, three-inside, tweezer, doji) +6 · Fib 50–78.6% retracement +6 · crypto volume spike +5 · in London/NY session +8, else −10 and flagged · forex: priority pair +5, strength bias agrees +5 (−5). Clamped to 5–95. Weights are untested guesses; backtest before trusting them.
@@ -71,6 +74,48 @@ Render sets `RENDER_EXTERNAL_URL` itself; the app uses it to register the Telegr
 
 ## Free hosting
 Render (free web service; it sleeps after 15 min idle, so use an external pinger such as UptimeRobot; the disk is ephemeral, so the SQLite history resets on redeploy unless you use a paid disk), Railway (trial credit), Fly.io (small free allowance; a volume keeps the SQLite file), or any always-on free VM (Oracle Cloud Always Free is the most robust for a 24/7 scanner). Start command: see `Procfile`.
+
+## Running without Grok Bot
+
+The live scanner, Telegram alerts, 6-hour PnL summary, dashboard, Mini App and auto-trade already run as `fvg-signal-bot.service` on the private server (user `fvg`, working directory `/opt/fvg-signal-bot/app`, environment file `/etc/fvg-signal-bot.env`, venv `/opt/fvg-signal-bot/venv`). They do not need Grok Bot.
+
+Two jobs that used to be Grok Bot routines now run as systemd timers on the same host and post to the owner Telegram chat through this bot (the token and chat id come from the environment file, never from a local `.env` on a development box):
+
+| Job | Command | When (Africa/Lagos) | Units |
+|---|---|---|---|
+| Weekly strategy report | `python -m app.weekly_report` | Mondays at 09:53 | `fvg-weekly-report.service` / `.timer` |
+| Monthly all-strategy backtest | `python -m app.backtest_all --days 1096 --workers 1` | 1st of the month at 09:00 | `fvg-monthly-backtest.service` / `.timer` |
+
+The unit files live in `deploy/systemd/`. The monthly backtest is niced, uses `ionice`, has `MemoryMax=3G` and an 8-hour timeout, and writes under `/var/lib/fvg-signal-bot/bt_all` so it cannot starve the live service (the live unit is itself capped at 1G). Persistent=true, so a missed run is executed after a reboot. The calendar lines name `Africa/Lagos` explicitly.
+
+**Deploy an update**
+
+1. Back up the current checkout, e.g. `tar -czf /var/backups/fvg-signal-bot/app-<timestamp>-pre-<hash>.tgz` from the app dir.
+2. Copy the new tree into `/opt/fvg-signal-bot/app` (tar over ssh is fine), `chown -R fvg:fvg` that tree, and write the git hash into `/opt/fvg-signal-bot/app/REVISION`.
+3. Restart **only** `fvg-signal-bot.service` if the running app code changed. Do not `daemon-reload` for an ordinary code push. Do **not** restart the live service for report/backtest-only changes.
+4. If the unit files in `deploy/systemd/` changed, copy them to `/etc/systemd/system/`, then `systemctl daemon-reload` and `systemctl enable --now fvg-weekly-report.timer fvg-monthly-backtest.timer`. Creating or changing unit files is the only case that needs `daemon-reload`. Enable and start the timers only; do not start the one-shot services unless you want a run now.
+
+**View logs**
+
+```bash
+journalctl -u fvg-signal-bot.service -e
+journalctl -u fvg-weekly-report.service -e
+journalctl -u fvg-monthly-backtest.service -e
+systemctl list-timers 'fvg-*'
+systemctl status fvg-weekly-report.timer fvg-monthly-backtest.timer
+```
+
+**Restart**
+
+```bash
+# live scanner / Telegram / dashboard (only when its code changed)
+sudo systemctl restart fvg-signal-bot.service
+# run a report or backtest now (does not restart the live service)
+sudo systemctl start fvg-weekly-report.service
+sudo systemctl start fvg-monthly-backtest.service
+```
+
+Health of the live service: `curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8100/health` (loopback only). Auto-trade stays off and in dry-run unless you switch it on; these jobs never change signal generation or alerts.
 
 ## Live posting filter (Oct 2026)
 ## Strategy tiers (since 2026-10-31)

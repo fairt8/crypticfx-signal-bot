@@ -1,6 +1,7 @@
 """Monthly backtest of ALL strategies (active + retired) with the live code paths, broken down per month and per market season.
-Usage:  python -m app.backtest_all [--days 120] [--crypto 20] [--workers 2] [--no-telegram] [--out bt_all]
+Usage:  python -m app.backtest_all [--days 1096] [--crypto 20] [--workers 2] [--no-telegram] [--out bt_all]
 Writes <out>/backtest-all-YYYY-MM-DD.md and .json; sends a short Telegram summary (TELEGRAM_* env) unless --no-telegram.
+Default window is 1096 days (at least 3 years). Forex 1h history from Yahoo is capped at ~730 days; crypto uses Binance history for the full window.
 
 Strategies and how they are replayed (same functions the live scan calls):
   FVG / FVG-D1 / FVG-PLAN / FVG+TREND  strategy.analyze on 4H + 15m (Binance), live gate setup_score >= MIN_POST_SCORE (70);
@@ -187,7 +188,7 @@ def agg(df):
     n = df.net_r.dropna(); return dict(n=int(len(n)), win=round(100*(df.loc[n.index, "r"] > 0).mean(), 1) if len(n) else None,
                                        net_r=round(float(n.sum()), 2), r_per_trade=round(float(n.mean()), 3) if len(n) else None)
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--days", type=int, default=120); ap.add_argument("--crypto", type=int, default=20)
+    ap = argparse.ArgumentParser(); ap.add_argument("--days", type=int, default=1096); ap.add_argument("--crypto", type=int, default=20)
     ap.add_argument("--workers", type=int, default=2); ap.add_argument("--no-telegram", action="store_true"); ap.add_argument("--out", default="bt_all")
     a = ap.parse_args(); T = time.time(); t0 = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=a.days)
     from . import binance, don20
@@ -225,7 +226,7 @@ def main():
     jp = os.path.join(a.out, f"backtest-all-{stamp}.json"); mp = os.path.join(a.out, f"backtest-all-{stamp}.md")
     json.dump(res, open(jp, "w"), indent=1, default=str); df.to_csv(os.path.join(a.out, f"trades-{stamp}.csv"), index=False)
     f = lambda v: "–" if v is None else (f"{v:+.3f}" if isinstance(v, float) else str(v))
-    L = [f"# All-strategy backtest {stamp}", "", f"Window: last {a.days} days (since {t0:%Y-%m-%d}). Crypto: {len(syms)} top coins; forex: {len(fx)} pairs. "
+    L = [f"# All-strategy backtest {stamp}", "", f"Window: last {a.days} days (since {t0:%Y-%m-%d}; forex 1h history may cap at ~730 days from Yahoo). Crypto: {len(syms)} top coins; forex: {len(fx)} pairs. "
          f"BTC season now: **{res['btc_season_now']}**. Net R after costs. Runtime {res['runtime_s']}s, peak RSS {res['max_rss_mb']} MB main / {res['max_rss_worker_mb']} MB per worker.", "",
          "## Totals", "", "|Strategy|Status|Trades|Win%|Net R|R/trade|", "|-|-|-|-|-|-|"]
     for k, v in res["strategies"].items():
@@ -248,7 +249,7 @@ def main():
         from . import telegram
         if telegram.enabled():
             print(f"[bt_all] telegram bot: @{telegram.token_shape().get('bot_username')}", flush=True)   # username only
-            T2 = [f"🧪 <b>Monthly backtest – all strategies</b>", f"<i>last {a.days} days · {len(syms)} coins · {len(fx)} FX pairs · BTC season: {res['btc_season_now']}</i>", "━━━━━━━━━━━━"]
+            T2 = [f"🧪 <b>Monthly backtest – all strategies</b>", f"<i>last {a.days} days (min. 3y crypto; FX 1h may cap at ~730d from Yahoo) · {len(syms)} coins · {len(fx)} FX pairs · BTC season: {res['btc_season_now']}</i>", "━━━━━━━━━━━━"]
             for k, v in res["strategies"].items():
                 t = v["total"]
                 if not t["n"]: T2.append(f"{v['label'].split()[0]} <b>{k}</b>: no trades"); continue

@@ -1,0 +1,38 @@
+# Weekly strategy report: Neon stats for the past week and all-time, posted to the
+# owner Telegram chat via the bot token in EnvironmentFile (never a box-local token).
+# Install: copy to /etc/systemd/system/, systemctl daemon-reload, enable the timer only.
+# Manual run: systemctl start fvg-weekly-report.service
+# Does not restart or depend on fvg-signal-bot.service staying up, but should not
+# be used to stop or change signal generation.
+[Unit]
+Description=CrypticFx weekly strategy report (Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fvg
+Group=fvg
+WorkingDirectory=/opt/fvg-signal-bot/app
+EnvironmentFile=/etc/fvg-signal-bot.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/fvg-signal-bot/venv/bin/python -m app.weekly_report
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+CPUQuota=50%
+MemoryHigh=128M
+MemoryMax=256M
+MemorySwapMax=128M
+TasksMax=32
+TimeoutStartSec=5min
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fvg-weekly-report
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fvg-signal-bot

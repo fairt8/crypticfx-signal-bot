@@ -1,0 +1,38 @@
+# Monthly all-strategy backtest (at least 3 years of history) with Telegram post
+# enabled. Runs at low priority with a memory cap so it cannot starve the live
+# scanner (fvg-signal-bot.service). Forex 1h history from Yahoo may cap at ~730 days.
+# Install: copy to /etc/systemd/system/, systemctl daemon-reload, enable the timer only.
+# Manual run: systemctl start fvg-monthly-backtest.service
+[Unit]
+Description=CrypticFx monthly all-strategy backtest (Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fvg
+Group=fvg
+WorkingDirectory=/opt/fvg-signal-bot/app
+EnvironmentFile=/etc/fvg-signal-bot.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/fvg-signal-bot/venv/bin/python -m app.backtest_all --days 1096 --workers 1 --out /var/lib/fvg-signal-bot/bt_all
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=80%
+CPUWeight=20
+MemoryHigh=2G
+MemoryMax=3G
+MemorySwapMax=512M
+TasksMax=64
+TimeoutStartSec=8h
+TimeoutStopSec=2min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fvg-monthly-backtest
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fvg-signal-bot

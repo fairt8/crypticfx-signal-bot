@@ -1,0 +1,13 @@
+# 1st of each month at 09:00 Africa/Lagos (WAT, UTC+1). Zone is named explicitly
+# so the time stays correct even if the host timezone is UTC.
+[Unit]
+Description=CrypticFx monthly all-strategy backtest timer
+
+[Timer]
+OnCalendar=*-*-01 09:00:00 Africa/Lagos
+AccuracySec=1min
+Persistent=true
+Unit=fvg-monthly-backtest.service
+
+[Install]
+WantedBy=timers.target

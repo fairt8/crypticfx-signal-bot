@@ -117,12 +117,12 @@ No shareable template is published, because the project is not complete. A draft
 - The weekly strategy report has had one successful run.
 - The pending strategy decisions above have been answered (CHK, PAT-WEDGE, the Neon quota, and the DON28 young-coin filter).
 
-**Run it without the assistant:** [README](../README.md), [AUTOTRADE.md](../AUTOTRADE.md), [strategy-spec.md](../strategy-spec.md), and the research READMEs under `research/`.
+**Run it without the assistant:** [README](../README.md) (including the "Running without Grok Bot" section), [AUTOTRADE.md](../AUTOTRADE.md), [strategy-spec.md](../strategy-spec.md), and the research READMEs under `research/`.
 
-The live scanner, Telegram alerts, 6-hour PnL summary, dashboard, Mini App and auto-trade already run on the private server and do not need Grok Bot or this development box. Two research jobs still do, and should be moved to server cron or systemd timers when you want the project fully standalone (not implemented in this change):
+The live scanner, Telegram alerts, 6-hour PnL summary, dashboard, Mini App and auto-trade already run on the private server and do not need Grok Bot or this development box. The two research jobs that used to be Grok Bot routines now run as systemd timers on the same server (unit files in `deploy/systemd/`) and post to the owner Telegram chat through the CrypticFx bot:
 
-- The weekly strategy report is a Grok Bot routine. It failed on 9 Nov 2026 when usage ran out, and it has not yet had a successful run.
-- The monthly backtest (`python -m app.backtest_all`) lives in this repo and can run on the server (it talks to Binance and yfinance, then can post the summary on Telegram), but it is started as a Grok Bot routine rather than a server timer today.
+- Weekly strategy report (`python -m app.weekly_report`): Mondays at 09:53 Africa/Lagos. Per-strategy stats from the database for the past week and all-time (signals, win rate, average net R, PnL in R and $ on the $1,000 / $10-per-1R account, tier, open trades) plus a short note on strategies flagged as unprofitable. Timer: `fvg-weekly-report.timer`.
+- Monthly backtest (`python -m app.backtest_all --days 1096`): 1st of each month at 09:00 Africa/Lagos, at least 3 years of history, Telegram post enabled. Runs at low priority with a memory cap so it cannot starve the live service. Forex 1h history from Yahoo may cap at ~730 days; crypto uses the full window. Timer: `fvg-monthly-backtest.timer`.
 
 ## Summary
 
