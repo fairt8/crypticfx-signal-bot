@@ -15,8 +15,9 @@ uvicorn app.web:app --port 8000          # dashboard at http://localhost:8000, s
 ## Structure
 | file | role |
 |---|---|
-| app/binance.py | top-N USDT pairs by **48h rolling quote volume** (`/api/v3/ticker?windowSize=2d`), klines; excludes stablecoins and leveraged tokens; refreshed every 6h |
-| app/forex.py | 30 instruments (7 majors, 21 crosses, XAUUSD, XAGUSD), session detection, currency-strength ranking, providers (yfinance / Twelve Data) |
+| app/binance.py | top-N USDT pairs by **48h rolling quote volume** (`/api/v3/ticker?windowSize=2d`), klines; excludes stablecoins and leveraged tokens; refreshed every 6h. If a kline request fails or is empty and OpenMarket is enabled, candles are fetched from the OpenMarket Data API (Binance spot, then Binance Futures) |
+| app/forex.py | 30 instruments (7 majors, 21 crosses, XAUUSD, XAGUSD), session detection, currency-strength ranking, providers (yfinance / Twelve Data / optional OpenMarket). Default primary is still yfinance; OpenMarket fills pairs the primary missed when enabled |
+| app/openmarket.py | Optional OpenMarket.xyz Data API client (OHLCV fallback). Off unless `OPENMARKET_ENABLED=1` and `OPENMARKET_API_KEY` are set |
 | app/strategy.py | FVG detection, core model, confidence scoring |
 | app/outcomes.py | pending → open (entry touched) → tp / sl; expires after 24h unfilled; TP and SL in the same candle = SL |
 | app/db.py | SQLite history |
@@ -35,6 +36,7 @@ Currency strength = average 24h % change of a currency across all pairs that con
 - Binance public data: no key needed; weight limits are generous (one scan ≈ 400 requests and takes about 35s).
 - yfinance (default forex): unofficial, can be delayed or rate-limited, and has no 4h interval (1h resampled to 4h). Gold and silver use COMEX futures GC=F / SI=F as proxies, so their prices differ from spot XAUUSD. FX volume is meaningless.
 - Twelve Data free tier: 800 credits/day and 8/min, too few for 30 pairs every 5 minutes (the code paces requests at 16s each); use it with fewer pairs or a paid plan. Another provider can be added by implementing `fetch_many(pairs) -> {pair: (df4h, df5m)}`.
+- OpenMarket.xyz Data API (optional fallback): `GET https://api.openmarket.xyz/v1/points` with `X-OpenMarket-Key`. Official coverage is crypto (this bot uses `BINANCE`, then `BINANCE_FUTURES`). It is used only when the primary source fails or lacks a symbol, or when `FOREX_PROVIDER=openmarket` (not the default; forex venues are not in the official exchange list). History depth follows the OpenMarket plan (Free 7 days, up to 1 year on Advanced), so it is not a 3-year backtest source. Rate limits are weight-based (Free: 10/min, 1000/day); the client caps calls, retries 429s, and caches briefly. Leave `OPENMARKET_ENABLED=0` until you add a key from your OpenMarket account settings.
 
 ## Deploy free: Render web service + Neon Postgres + 10-minute pinger
 **1. Database (Neon, free).** Create a project at neon.tech, then copy the *pooled* connection string, e.g.

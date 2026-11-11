@@ -42,13 +42,35 @@ def top_usdt_symbols(n=C.CRYPTO_TOP_N):
             vol[t["symbol"]] = float(t["quoteVolume"])
     return sorted(vol, key=lambda s: -vol[s])[:n]
 
-def klines(symbol, interval, limit=300):
+def _klines_binance(symbol, interval, limit=300):
     d = get("/api/v3/klines", symbol=symbol, interval=interval, limit=limit)
     df = pd.DataFrame(d, columns="t o h l c v ct qv n tb tq i".split())[["t","o","h","l","c","v","ct"]]
     df[["o","h","l","c","v"]] = df[["o","h","l","c","v"]].astype(float)
     df["t"] = pd.to_datetime(df.t, unit="ms", utc=True); df["ct"] = pd.to_datetime(df.ct, unit="ms", utc=True)
     now = pd.Timestamp.now(tz="UTC")
     return df[df.ct < now].reset_index(drop=True)  # closed candles only
+
+def klines(symbol, interval, limit=300):
+    """Closed candles from Binance, falling back to OpenMarket when enabled and the primary fails or is empty."""
+    err = None
+    try:
+        df = _klines_binance(symbol, interval, limit)
+        if df is not None and len(df):
+            return df
+    except Exception as e:
+        err, df = e, None
+    try:
+        from . import openmarket as om
+        if om.enabled():
+            alt = om.crypto_klines(symbol, interval, limit)
+            if alt is not None and len(alt):
+                print(f"[binance] {symbol} {interval}: OpenMarket fallback ({len(alt)} bars)", flush=True)
+                return alt
+    except Exception as e:
+        print(f"[binance] {symbol} {interval}: OpenMarket fallback failed: {type(e).__name__}", flush=True)
+    if err is not None:
+        raise err
+    return df if df is not None else _klines_binance(symbol, interval, limit)
 
 _DAILY = {}   # symbol -> (fetched_at, df); daily candles change slowly, refresh every DAILY_REFRESH_HOURS
 def daily(symbol):

@@ -1,7 +1,7 @@
 """Auto-trade add-on tests (mocked MEXC, temp SQLite). Run: python -m pytest -q tests/test_autotrade.py
 Never touches Telegram, Neon or MEXC: env is blanked before the app is imported."""
 import os, sys, json, hmac, hashlib, threading, time, base64
-os.environ.update(DATABASE_URL="", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="1", MEXC_API_KEY="", MEXC_API_SECRET="", WEEX_API_KEY="", WEEX_API_SECRET="", WEEX_API_PASSPHRASE="", AUTOTRADE_WORKER="0", ENABLE_SCHEDULER="0")
+os.environ.update(DATABASE_URL="", TELEGRAM_BOT_TOKEN="", TELEGRAM_CHAT_ID="1", MEXC_API_KEY="", MEXC_API_SECRET="", WEEX_API_KEY="", WEEX_API_SECRET="", WEEX_API_PASSPHRASE="", AUTOTRADE_WORKER="0", ENABLE_SCHEDULER="0", OPENMARKET_API_KEY="", OPENMARKET_ENABLED="0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone, timedelta
 import pytest

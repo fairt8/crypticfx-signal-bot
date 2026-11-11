@@ -101,9 +101,77 @@ def _finish(df, freq):
     df = df[df.ct <= pd.Timestamp.now(tz="UTC")]
     return df.reset_index(drop=True)
 
+class OpenMarketForexProvider:
+    """Optional forex source via the OpenMarket Data API. Official docs list crypto exchanges only;
+    this is a best-effort mapping (OPENMARKET_FOREX_EXCHANGE, default INTERBANK_FX) and stays off
+    as the primary unless FOREX_PROVIDER=openmarket. Missing pairs fall through silently."""
+    name = "openmarket"
+    def fetch_many(self, pairs):
+        from . import openmarket as om
+        if not om.enabled(): return {}
+        want = list(dict.fromkeys(pairs)); real = list(dict.fromkeys(q for p in want for q in SYNTH.get(p, (p,))))
+        raw = {}
+        for p in real:
+            try:
+                h1 = om.forex_klines(p, "1h", 1500); ltf = om.forex_klines(p, C.LTF, 400)
+                if len(h1) and len(ltf):
+                    raw[p] = (h1.set_index("t")[_OHLCV], ltf.set_index("t")[_OHLCV])
+            except Exception:
+                pass
+        out = {}
+        for p in want:
+            try:
+                if p in SYNTH:
+                    x, y = SYNTH[p]
+                    if x not in raw or y not in raw: continue
+                    a = synth(raw[x][0], raw[y][0]); b = synth(raw[x][1], raw[y][1])
+                else:
+                    if p not in raw: continue
+                    a, b = raw[p]
+                out[p] = (_finish(_h4(a), "4h"), _finish(b, C.LTF_FREQ), _finish(a, "1h"))
+            except Exception:
+                pass
+        return out
+
+class _FallbackForex:
+    """Use the primary provider first; fill only the pairs it missed, without changing provider.name."""
+    def __init__(self, primary, fallback):
+        self.name = primary.name; self.primary = primary; self.fallback = fallback
+    def fetch_many(self, pairs):
+        want = list(pairs); out = {}
+        try: out = self.primary.fetch_many(want) or {}
+        except Exception: out = {}
+        missing = [p for p in want if p not in out or not out[p] or not len(out[p][0])]
+        if missing:
+            try:
+                extra = self.fallback.fetch_many(missing) or {}
+                filled = []
+                for p, v in extra.items():
+                    if v and len(v[0]):
+                        out[p] = v; filled.append(p)
+                if filled:
+                    print(f"[forex] OpenMarket fallback filled {', '.join(sorted(filled))}", flush=True)
+            except Exception as e:
+                print(f"[forex] OpenMarket fallback failed: {type(e).__name__}", flush=True)
+        return out
+
 def provider():
-    if C.FOREX_PROVIDER == "twelvedata" and C.TWELVEDATA_API_KEY: return TwelveDataProvider()
-    return YFinanceProvider()
+    if C.FOREX_PROVIDER == "openmarket":
+        primary = OpenMarketForexProvider()
+    elif C.FOREX_PROVIDER == "twelvedata" and C.TWELVEDATA_API_KEY:
+        primary = TwelveDataProvider()
+    else:
+        primary = YFinanceProvider()
+    # OpenMarket is a fallback when enabled, even if it is not the configured primary.
+    # Keep yfinance as the default primary; FOREX_PROVIDER=openmarket opts in as primary.
+    if C.FOREX_PROVIDER != "openmarket":
+        try:
+            from . import openmarket as om
+            if om.enabled():
+                return _FallbackForex(primary, OpenMarketForexProvider())
+        except Exception:
+            pass
+    return primary
 
 def currency_strength(data, hours=24):
     """Strength per currency = avg % change over `hours` across all pairs containing it (sign-adjusted)."""

@@ -12,8 +12,20 @@ DATABASE_URL = E("DATABASE_URL", "")  # Postgres (e.g. Neon) when set; SQLite fa
 BINANCE_BASE = E("BINANCE_BASE", "https://data-api.binance.vision")  # public market-data mirror; api.binance.com also works
 BINANCE_API_KEY = E("BINANCE_API_KEY", "")
 CRYPTO_TOP_N = int(E("CRYPTO_TOP_N", "300"))
-FOREX_PROVIDER = E("FOREX_PROVIDER", "yfinance")  # yfinance | twelvedata
+FOREX_PROVIDER = E("FOREX_PROVIDER", "yfinance")  # yfinance | twelvedata | openmarket
 TWELVEDATA_API_KEY = E("TWELVEDATA_API_KEY", "")
+# OpenMarket.xyz Data API (https://api.openmarket.xyz). Fallback when Binance/yfinance fail or lack a symbol.
+# Off unless OPENMARKET_ENABLED=1 and OPENMARKET_API_KEY is set. Do not switch FOREX_PROVIDER to openmarket
+# unless you have confirmed forex coverage on your plan; official docs list crypto exchanges only.
+OPENMARKET_API_KEY = E("OPENMARKET_API_KEY", "")
+OPENMARKET_ENABLED = E("OPENMARKET_ENABLED", "0") == "1"
+OPENMARKET_BASE = E("OPENMARKET_BASE", "https://api.openmarket.xyz")
+OPENMARKET_CRYPTO_EXCHANGE = E("OPENMARKET_CRYPTO_EXCHANGE", "BINANCE")          # spot, matches primary klines
+OPENMARKET_CRYPTO_EXCHANGE_ALT = E("OPENMARKET_CRYPTO_EXCHANGE_ALT", "BINANCE_FUTURES")
+OPENMARKET_FOREX_EXCHANGE = E("OPENMARKET_FOREX_EXCHANGE", "INTERBANK_FX")        # best-effort; not in the official enum
+OPENMARKET_TIMEOUT_S = float(E("OPENMARKET_TIMEOUT_S", "15"))
+OPENMARKET_CACHE_S = int(E("OPENMARKET_CACHE_S", "60"))
+OPENMARKET_MAX_PER_MIN = int(E("OPENMARKET_MAX_PER_MIN", "8"))
 def _clean_token(t):
     t = "".join((t or "").split()).strip("'\"`")   # drop whitespace/newlines anywhere and surrounding quotes
     if t.lower().startswith("bot") and ":" in t: t = t[3:]

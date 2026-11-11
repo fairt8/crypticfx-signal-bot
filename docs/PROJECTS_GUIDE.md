@@ -3,7 +3,7 @@
 One place for each project: what counts as "complete", where its code lives, and its shareable bot template.
 Projects that aren't finished don't get a published template.
 
-_Generated 10 Nov 2026. This guide has no secrets, keys, server addresses or private links._
+_Updated 11 Nov 2026. This guide has no secrets, keys, server addresses or private links._
 
 ## CrypticFx (this repo)
 
@@ -36,6 +36,7 @@ A crypto and forex signal generator: a Telegram bot and scanner, a web dashboard
 - [x] Background-only / retired: FVG, PAT-CUP, and MF-REJ crypto (research only). No new live alerts from these.
 - [x] Telegram alerts and a PnL summary every 6 hours.
 - [x] Auto-trade cannot change signal generation or alerts.
+- [x] Optional OpenMarket.xyz Data API candle fallback (crypto; forex best-effort only). Off until `OPENMARKET_ENABLED=1` and `OPENMARKET_API_KEY` are set on the server. Signal logic and tiers are unchanged; the default primary sources remain Binance public klines and yfinance.
 - [ ] Pending strategy decisions (see below) still need an owner choice.
 - [ ] DON28 coins with fewer than 200 daily bars currently pass through unfiltered (same as the research default).
 
@@ -117,6 +118,11 @@ No shareable template is published, because the project is not complete. A draft
 - The pending strategy decisions above have been answered (CHK, PAT-WEDGE, the Neon quota, and the DON28 young-coin filter).
 
 **Run it without the assistant:** [README](../README.md), [AUTOTRADE.md](../AUTOTRADE.md), [strategy-spec.md](../strategy-spec.md), and the research READMEs under `research/`.
+
+The live scanner, Telegram alerts, 6-hour PnL summary, dashboard, Mini App and auto-trade already run on the private server and do not need Grok Bot or this development box. Two research jobs still do, and should be moved to server cron or systemd timers when you want the project fully standalone (not implemented in this change):
+
+- The weekly strategy report is a Grok Bot routine. It failed on 9 Nov 2026 when usage ran out, and it has not yet had a successful run.
+- The monthly backtest (`python -m app.backtest_all`) lives in this repo and can run on the server (it talks to Binance and yfinance, then can post the summary on Telegram), but it is started as a Grok Bot routine rather than a server timer today.
 
 ## Summary
 
