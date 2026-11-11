@@ -14,7 +14,9 @@ Flow (every AUTOTRADE_POLL_S, default 60 s, leader instance only):
        wait; never converted to market); market-entry signals = market (drift check);
        isolated, SL/TP attached to the order
   then mirrors the bot's tracked trade: FVG+TREND final stop/target at fill, DON20/DON28 trailing stop (SL amended),
-  CHK/FVG-D1 50% at TP1 + stop to entry, and a reduce-only close when the tracked trade closes. Unfilled limits are
+  CHK/FVG-D1 50% at TP1 + stop to entry (never loosening a tighter stop), an optional breakeven+ stop move (once price
+  has travelled be_trigger_pct of the way to the final TP, move SL to lock be_lock_pct of that distance; default 30/5,
+  once, never loosen), and a reduce-only close when the tracked trade closes. Unfilled limits are
   cancelled at the timeout or when the signal invalidates first.
 Dry-run (default) logs/simulates the same orders without calling any private exchange endpoint.
 
@@ -46,7 +48,8 @@ DEFAULTS = dict(enabled=False, dry_run=True, strategies=[], risk_usdt=1.0, max_o
                 limit_timeout_min=1440, cancel_pct=70.0, max_notional_usdt=0.0, daily_loss_usdt=0.0, enabled_at=None, strat_on={}, salt=None, updated_at=None,
                 exchanges=["mexc", "weex"], lev_mode="cap", size_line=True,
                 min_bump=True, bump_max_risk_usdt=0.0, bump_max_margin_usdt=0.0,
-                sizing_mode="risk", margin_usdt=1.0, risk_pct=1.0)   # sizing: risk ($ risk_usdt) | margin (margin_usdt x leverage) | pct (risk_pct % of balance at the stop)
+                sizing_mode="risk", margin_usdt=1.0, risk_pct=1.0,   # sizing: risk ($ risk_usdt) | margin (margin_usdt x leverage) | pct (risk_pct % of balance at the stop)
+                be_plus=True, be_trigger_pct=30.0, be_lock_pct=5.0)  # BE+: once price is trigger% of the way to the final TP, move SL to lock% of that distance (once, never loosen)
 SIZING = ("risk", "margin", "pct")
 SIZING_LABEL = {"risk": "$ risk", "margin": "Fixed margin", "pct": "% of balance"}
 BAL_KEY = "autotrade:balance"   # last available-USDT read per exchange (for the 📐 Size line in % mode); own kv key   # bump caps: risk 0 = auto (2x risk_usdt), margin 0 = off
@@ -78,6 +81,32 @@ def progress(direction, entry, target, p):
     """Share of the entry -> target distance the price has moved in the trade's direction (can be < 0 or > 1)."""
     if target is None or p is None or float(target) == float(entry): return None
     return (float(p) - float(entry)) / (float(target) - float(entry))
+def final_tp(r, src=None):
+    """Furthest/final take-profit of the trade: the signal's TP field (not TP1). DON / no-target trades return None."""
+    for x in (src, r):
+        if not x: continue
+        v = x.get("tp")
+        if v in (None, ""): continue
+        try: return float(v)
+        except (TypeError, ValueError): pass
+    return None
+def sl_better(direction, new, old):
+    """True if `new` is a tighter (more favourable) stop than `old`. A looser stop is never better."""
+    if new is None: return False
+    if old is None: return True
+    return (float(new) > float(old) + 1e-12) if direction == "long" else (float(new) < float(old) - 1e-12)
+def be_prices(direction, entry, tp, trigger_pct=30, lock_pct=5):
+    """Trigger price and the BE+ stop: entry ± N% of the entry→final-TP distance. None when there is no usable TP."""
+    if tp is None or entry is None or float(tp) == float(entry): return None
+    entry, tp = float(entry), float(tp)
+    if (tp > entry) != (direction == "long"): return None
+    dist = tp - entry
+    return dict(trigger=entry + dist * float(trigger_pct) / 100, sl=entry + dist * float(lock_pct) / 100, tp=tp)
+def _note(r):
+    try:
+        n = r.get("note")
+        return json.loads(n) if isinstance(n, str) and n else (dict(n) if isinstance(n, dict) else {})
+    except Exception: return {}
 STATE = dict(last_tick=None, last_result=None, errors=collections.deque(maxlen=30), skips=collections.deque(maxlen=30), backoff_until=0, idle_until=0, perm={})
 PERM_NOTE = {"mexc": ("MEXC key can't read the account balance (code 700007). In MEXC ▸ API Management edit this key and also tick "
                       "\"View Account Details\". Until then the margin pre-check is skipped and MEXC itself rejects an order if margin is short."),
@@ -235,7 +264,12 @@ def validate(patch, cur):
         elif k == "limit_timeout_min": s[k] = _num(v, 0, MAX_WAIT_MAX, "Max wait for an unfilled limit (minutes, 0 = off)", int); s["wait_v2"] = True
         elif k == "max_notional_usdt": s[k] = round(_num(v, 0, 10000000, "Max notional (USDT)"), 2)
         elif k == "daily_loss_usdt": s[k] = round(_num(v, 0, 10000000, "Daily loss limit (USDT)"), 2)
+        elif k == "be_plus": s[k] = bool(v)
+        elif k == "be_trigger_pct": s[k] = round(_num(v, 10, 90, "Breakeven+ trigger (% of the way to the final TP)"), 2)
+        elif k == "be_lock_pct": s[k] = round(_num(v, 0, 50, "Breakeven+ lock (% of the target distance to lock in)"), 2)
         else: raise ValueError(f"unknown setting: {k}")
+    if float(s.get("be_lock_pct") or 0) >= float(s.get("be_trigger_pct") or 30):
+        raise ValueError("breakeven+ lock % must be below the trigger %")
     if not s.get("salt"): s["salt"] = secrets.token_hex(2)
     s["updated_at"] = now; return s
 def save_settings(patch):
@@ -435,20 +469,29 @@ def manage(ctx, r, src, s):
         R = abs(r["entry"] - r["init_sl"]); tp1 = r["entry"] + sd * 1.5 * R
         if R and abs(r["tp"] - r["entry"]) > 1.5 * R + 1e-12 and ((p >= tp1) if long else (p <= tp1)):
             half = r["vol"] / 2
+            be_sl = r["fill_price"] or r["entry"]
+            if not sl_better(r["direction"], be_sl, r["sl"]): be_sl = r["sl"]   # never loosen a BE+ (or already tighter) stop
             if live:
                 c = ad.instrument(r["contract"]); half = M.floor_vol(half, c)
                 if half >= float(c.get("minVol") or 0) and half > 0: _close_live(ctx, r, half, "h")
                 else: half = 0
-                _amend_live(ctx, r, r["entry"], r["tp"])
+                _amend_live(ctx, r, be_sl, r["tp"])
             cs = (r["qty"] / r["vol"]) if r["vol"] else 0; part = _pnl(r, tp1, half * cs) if half else 0.0
-            _upd(r["id"], half_done=1, sl=r["fill_price"] or r["entry"], vol=r["vol"] - half, qty=(r["vol"] - half) * cs, pnl_usdt=round(part, 4))
-            ctx.msg(r, _hdr(r, "🎯", "TP1 · 50% closed, stop to entry") + f"\n+{part:.2f} USDT (est.)"); return
-    # 4) follow the bot's stop/target (FVG+TREND final levels at fill, DON trailing stop)
+            _upd(r["id"], half_done=1, sl=be_sl, vol=r["vol"] - half, qty=(r["vol"] - half) * cs, pnl_usdt=round(part, 4))
+            ctx.msg(r, _hdr(r, "🎯", "TP1 · 50% closed, stop to entry" if abs(float(be_sl) - float(r["fill_price"] or r["entry"])) < 1e-12 else "TP1 · 50% closed, stop kept") + f"\n+{part:.2f} USDT (est.)")
+            r = dict(r, half_done=1, sl=be_sl, vol=r["vol"] - half, qty=(r["vol"] - half) * cs, pnl_usdt=round(part, 4))
+    # 4) follow the bot's stop/target (FVG+TREND final levels at fill, DON trailing stop) — never loosen the current stop
     want_sl = (src.get("stop") if don else (r["sl"] if r["half_done"] else src.get("sl")))
     want_tp = None if don else src.get("tp")
+    if want_sl and not sl_better(r["direction"], want_sl, r["sl"]) and abs(float(want_sl) - float(r["sl"] or 0)) > 1e-12:
+        want_sl = r["sl"]
     if want_sl and (abs(float(want_sl) - float(r["sl"] or 0)) > 1e-12 or (want_tp and abs(float(want_tp) - float(r["tp"] or 0)) > 1e-12)):
         if live: _amend_live(ctx, r, want_sl, want_tp)
         _upd(r["id"], sl=float(want_sl), tp=float(want_tp) if want_tp else r["tp"])
+        r = dict(r, sl=float(want_sl), tp=float(want_tp) if want_tp else r["tp"])
+    # 5) breakeven+: once price is trigger% (default 30) of the way to the final TP, move SL to lock% (default 5) of that
+    #    distance, once, only if the new stop is better. Auto-trade positions only; never changes signal tracking.
+    _maybe_be(ctx, r, src, s, p)
 
 # ---------------- open a new auto trade ----------------
 def candidates(s, sigs, dons, known):
@@ -679,6 +722,62 @@ def _open_on(ctx, s, cnd, ad, rid, why):
         ctx.msg(full, _hdr(full, "⏳", f"{ad.label} order state unknown") + f"\n<i>{X.short(e)[:150]}</i>\nNot sent to the backup exchange, to avoid a double position. Checking {ad.label} by order id next minute.")
         return i
 
+def _maybe_be(ctx, r, src, s, p):
+    """Move the exchange stop to lock a small profit once price has travelled `be_trigger_pct` of the way to the
+    furthest/final TP. Once per trade; never loosens a stop. Dry-run only simulates and alerts 'would move SL to X'.
+    An amend failure leaves the old stop in place, is logged, and alerts the owner (retried next tick)."""
+    if not s.get("be_plus", True) or p is None: return
+    n = _note(r)
+    if n.get("be_plus"): return
+    tp = final_tp(r, src)
+    if not tp: return
+    entry = float(r["fill_price"] or r["entry"]); live = not r["dry"]
+    trig = float(s.get("be_trigger_pct") or 30); lock = float(s.get("be_lock_pct") or 5)
+    lv = be_prices(r["direction"], entry, tp, trig, lock)
+    if not lv: return
+    pr = progress(r["direction"], entry, tp, p)
+    if pr is None or pr < trig / 100 - 1e-12: return
+    new_sl = lv["sl"]; old = r["sl"]
+    try:
+        ad = ctx.ads.get(exof(r)) or (ctx.ad(r) if live else None)
+        if ad:
+            new_sl = M.round_price(new_sl, ad.instrument(r["contract"]))
+    except Exception as e:
+        if live: _err(f"BE+ round {r.get('symbol')}", e); return
+    if not sl_better(r["direction"], new_sl, old):
+        n["be_plus"] = True; n["be_skip"] = "stop already better"
+        _upd(r["id"], note=json.dumps(n)); return
+    locked = round(_pnl(r, new_sl), 4); lb = X.LABEL.get(exof(r), exof(r))
+    def alert(ok, err=None):
+        if err:
+            ctx.msg(r, _hdr(r, "⚠️", "breakeven+ stop not moved") +
+                    f"\n🛑 kept {_fmt(old)} (amend failed; the existing stop still protects the position)"
+                    f"\n<code>{err[:150]}</code>")
+            return
+        title = f"would move SL to {_fmt(new_sl)}" if r["dry"] else "breakeven+ · stop moved"
+        ctx.msg(r, _hdr(r, "🔐", title) + f"\n🛑 {_fmt(old)} → <b>{_fmt(new_sl)}</b>"
+                f"\n💰 Profit locked in: <b>{locked:+.2f} USDT</b>"
+                f"\n<i>{'Would move SL to ' + _fmt(new_sl) + '. ' if r['dry'] else ''}"
+                f"Price reached {trig:g}% of the way to the final target {_fmt(tp)}; "
+                f"stop moved once to lock {lock:g}% of the target distance.</i>")
+    if not live:
+        n["be_plus"] = True; n["be_sl"] = new_sl
+        _upd(r["id"], sl=new_sl, note=json.dumps(n))
+        print(f"[autotrade] DRY would move SL to {new_sl} {r['symbol']} on {lb} ({old} -> {new_sl}, lock {locked:+.2f} USDT)", flush=True)
+        alert(True); return
+    try:
+        if not _amend_live(ctx, r, new_sl, r["tp"] or tp):
+            return   # no position right now; don't mark done, don't drop the stop
+    except Exception as e:
+        _err(f"BE+ amend {r.get('symbol')} on {lb}", e)
+        k = ("be", r["id"])
+        if time.time() - _ERRSENT.get(k, 0) > 900: _ERRSENT[k] = time.time(); alert(False, err=X.short(e))
+        return
+    n["be_plus"] = True; n["be_sl"] = new_sl
+    _upd(r["id"], sl=new_sl, note=json.dumps(n))
+    print(f"[autotrade] moved SL {r['symbol']} on {lb} {old} -> {new_sl} (BE+ {lock:g}% of final TP {tp}, lock {locked:+.2f} USDT)", flush=True)
+    alert(True)
+
 def daily_pnl(now, dry):
     t0 = iso(_wat_day_start(now))
     rs = _q("SELECT pnl_usdt FROM autotrade WHERE status='closed' AND closed_at>=? AND dry=?", (t0, 1 if dry else 0))
@@ -803,7 +902,7 @@ def view():
                     upnl_usdt=round(sum(r.get("upnl_usdt") or 0 for r in act if bool(r["dry"]) == dry), 2))
     pub = {k: v for k, v in s.items() if k not in ("salt",)}
     for r in rows:
-        try: n = json.loads(r.get("note") or "{}"); r["skip"] = n.get("skip"); r["error"] = n.get("error"); r["timeout"] = n.get("timeout"); r["bump"] = n.get("bump")
+        try: n = json.loads(r.get("note") or "{}"); r["skip"] = n.get("skip"); r["error"] = n.get("error"); r["timeout"] = n.get("timeout"); r["bump"] = n.get("bump"); r["be_plus"] = n.get("be_plus")
         except Exception: pass
     exs = []
     for n in X.NAMES:
@@ -850,6 +949,7 @@ def panel_text():
          f"⬆️ Min-order bump: <b>{'ON' if s.get('min_bump', True) else 'OFF'}</b>" + (f" · up to {esc(bcap)}, else skip" if s.get("min_bump", True) else " · below-minimum sizes are skipped"),
          f"💵 Sizing: <b>{esc(sizing_desc(s))}</b> · max open <b>{s['max_open']}</b> · leverage <b>{esc(lv)}</b>",
          f"🧾 Order: {esc(ot)}",
+         f"🔐 Breakeven+: <b>{'ON' if s.get('be_plus', True) else 'OFF'}</b>" + (f" · move the stop to lock {float(s.get('be_lock_pct') or 5):g}% of the final-TP distance once price reaches {float(s.get('be_trigger_pct') or 30):g}% of the way to the final target" if s.get("be_plus", True) else ""),
          f"🧱 Max position size: {('%g USDT' % s['max_notional_usdt']) if s['max_notional_usdt'] else 'off'} <i>(caps qty × price per trade)</i> · daily loss limit: {('%g USDT' % s['daily_loss_usdt']) if s['daily_loss_usdt'] else 'off'}",
          f"📐 Size line on signal alerts: {'ON' if s.get('size_line', True) else 'OFF'}",
          "📋 Strategies: " + (esc(", ".join(s["strategies"])) if s["strategies"] else "<i>none</i>")]
@@ -862,7 +962,8 @@ def panel_text():
           "Orders: <code>/autotrade auto</code> (follow the signal) · <code>limit</code> · <code>cancelpct 70</code> (cancel an unfilled limit at N% of the way to the target) · <code>maxwait 24</code> (hours, 0 = off)",
           "Sizing: <code>/autotrade sizing risk|margin|pct</code> · <code>margin 5</code> (USDT margin per trade) · <code>pct 1</code> (% of balance risked at the stop) – setting a number never switches the mode",
           "Exchanges: <code>/autotrade exchanges mexc</code> · <code>weex</code> · <code>mexc,weex</code> · <code>weex,mexc</code>",
-          "Min-order bump: <code>/autotrade minbump on|off</code> · <code>bumprisk 2</code> (max $ risk when bumped, 0 = auto 2× risk) · <code>bumpmargin 5</code> (max $ margin when bumped, 0 = off)"]
+          "Min-order bump: <code>/autotrade minbump on|off</code> · <code>bumprisk 2</code> (max $ risk when bumped, 0 = auto 2× risk) · <code>bumpmargin 5</code> (max $ margin when bumped, 0 = off)",
+          "Breakeven+: <code>/autotrade be on|off</code> · <code>betrigger 30</code> (% of the way to the final TP, 10–90) · <code>belock 5</code> (% of the TP distance to lock, 0–50, must be below the trigger)"]
     return "\n".join(L)
 def panel_markup():
     s = settings(); B = lambda t, d: {"text": t, "callback_data": d}
@@ -879,11 +980,13 @@ def panel_markup():
     sm = s.get("sizing_mode") or "risk"
     rows.append([B(("● " if sm == k else "") + {"risk": "$ risk", "margin": "Fixed margin", "pct": "% balance"}[k], "at:sm:" + k) for k in SIZING])
     rows.append([B(("✅" if s.get("min_bump", True) else "⬜") + f" Min-order bump (≤ {bump_cap_txt(s)} risk)", "at:mb")])
+    rows.append([B(("✅" if s.get("be_plus", True) else "⬜") + f" Breakeven+ ({float(s.get('be_trigger_pct') or 30):g}% → lock {float(s.get('be_lock_pct') or 5):g}%)", "at:be")])
     rows.append([B("🛑 Flatten all…", "at:fl"), B("↻ Refresh", "at:rf")])
     return {"inline_keyboard": rows}
 NUM = {"risk": "risk_usdt", "maxopen": "max_open", "max": "max_open", "lev": "leverage", "leverage": "leverage", "notional": "max_notional_usdt", "size": "max_notional_usdt",
        "dailyloss": "daily_loss_usdt", "loss": "daily_loss_usdt", "timeout": "limit_timeout_min", "cancelpct": "cancel_pct",
-       "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt", "margin": "margin_usdt", "pct": "risk_pct"}
+       "bumprisk": "bump_max_risk_usdt", "bumpmargin": "bump_max_margin_usdt", "margin": "margin_usdt", "pct": "risk_pct",
+       "betrigger": "be_trigger_pct", "belock": "be_lock_pct"}
 def tg_command(text):
     """/autotrade [on|off|risk N|maxopen N|lev N|notional N|dailyloss N|timeout N] -> (reply text, markup or None)."""
     a = text.split()[1:]
@@ -907,11 +1010,12 @@ def tg_command(text):
                 m = {"risk": "risk", "$": "risk", "usd": "risk", "margin": "margin", "fixed": "margin", "pct": "pct", "%": "pct", "percent": "pct", "balance": "pct"}.get(a[1].lower(), a[1].lower())
                 save_settings(dict(sizing_mode=m))
             elif w in ("minbump", "bump") and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(min_bump=a[1].lower() == "on"))
+            elif w == "be" and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(be_plus=a[1].lower() == "on"))
             elif w == "primary" and len(a) > 1: save_settings(dict(primary_exchange=a[1].lower()))
             elif w == "failover" and len(a) > 1 and a[1].lower() in ("on", "off", "auto"): save_settings(dict(failover=None if a[1].lower() == "auto" else a[1].lower() == "on"))
             elif w in X.NAMES and len(a) > 1 and a[1].lower() in ("on", "off"): save_settings(dict(ex_on={w: a[1].lower() == "on"}))
             else: return ("Usage: /autotrade [on|off|auto|limit|cancelpct N|maxwait H|timeout MIN|risk N|maxopen N|lev N|lev max|size N|dailyloss N|timeout 5|10|15|0|sizeline on|off|"
-                          "sizing risk|margin|pct|margin N|pct N|exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
+                          "sizing risk|margin|pct|margin N|pct N|exchanges mexc|weex|mexc,weex|weex,mexc|minbump on|off|bumprisk N|bumpmargin N|be on|off|betrigger N|belock N|primary mexc|weex|failover on|off|mexc on|off|weex on|off]"), None
     except ValueError as e: return f"⚠️ {e}", None
     return panel_text(), panel_markup()
 def tg_callback(data):
@@ -935,6 +1039,7 @@ def tg_callback(data):
         if d.startswith("sm:"): s = save_settings(dict(sizing_mode=d[3:])); return "Sizing: " + SIZING_LABEL[s["sizing_mode"]], panel_text(), panel_markup(), None
         if d.startswith("em:"): s = save_settings(dict(exchanges=d[3:])); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
         if d == "mb": s = save_settings(dict(min_bump=not s.get("min_bump", True))); return "Min-order bump " + ("ON" if s["min_bump"] else "OFF"), panel_text(), panel_markup(), None
+        if d == "be": s = save_settings(dict(be_plus=not s.get("be_plus", True))); return "Breakeven+ " + ("ON" if s["be_plus"] else "OFF"), panel_text(), panel_markup(), None
         # legacy buttons (panels sent before 2026-11-10)
         if d == "px": s = save_settings(dict(primary_exchange=[x for x in X.NAMES if x != exchanges_of(s)[0]][0])); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None
         if d == "fo": s = save_settings(dict(failover=not failover_on(s))); return "Exchanges: " + mode_label(s), panel_text(), panel_markup(), None

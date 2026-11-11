@@ -18,7 +18,8 @@ Ships OFF: master switch off, no strategies enabled, dry-run on, no key.
 ## Controls
 `/autotrade` panel (inline buttons) · `/autotrade off` stops new orders · `/flatten` (confirm) closes every auto position ·
 numbers: `/autotrade risk 2`, `maxopen 3`, `lev 5`, `notional 100`, `dailyloss 20`, `cancelpct 70`, `maxwait 24` (hours), `timeout N` (minutes),
-`bumprisk 2`, `bumpmargin 5` · exchanges: `/autotrade exchanges mexc|weex|mexc,weex|weex,mexc` · `/autotrade minbump on|off`.
+`bumprisk 2`, `bumpmargin 5`, `betrigger 30`, `belock 5` · exchanges: `/autotrade exchanges mexc|weex|mexc,weex|weex,mexc` · `/autotrade minbump on|off` ·
+`/autotrade be on|off`.
 Mini App ▸ Auto has the same settings plus open positions, pending limits and PnL (owner-only `/app/api/autotrade`).
 
 ## Exchange mode (t156u, 2026-11-10): MEXC only · WEEX only · MEXC → WEEX · WEEX → MEXC
@@ -170,3 +171,23 @@ The old 5/10/15-min windows are no longer the default: a saved 5/10/15 (or no va
 (10–100) · `/autotrade maxwait H` (hours, 0 = off) · `/autotrade timeout N` (minutes, 0–10080). Telegram panel: Follow
 the signal / Limit only and max-wait buttons; Mini App ▸ Auto ▸ Settings: order type, cancel % field (saved with "Save
 numbers"), max-wait chips; each strategy chip shows limit / market.
+
+## Breakeven+ stop (t163u, 2026-11-11)
+For each **filled** auto-trade position, once price has travelled `be_trigger_pct` (default **30%**) of the way from the
+fill to the **furthest/final** take-profit (the signal's TP field, not TP1), the exchange stop is moved once to
+entry + `be_lock_pct` (default **5%**) of that same distance (the mirror for shorts). That locks in a small profit.
+It runs only if the new stop is better than the current one; a stop is never loosened. Done once per trade (flag in the
+row note). Strategies with no target (DON trailing stop) are skipped. This does not change signal generation, signal
+alerts, or the signal outcome tracker.
+
+On MEXC the existing plan/stop order is amended with `/api/v1/private/stoporder/change_plan_price` (or placed with
+`/api/v1/private/stoporder/place` if none is open). On WEEX the attached TP/SL algo is amended with
+`/capi/v3/modifyTpSlOrder` (or placed full-position with `/capi/v3/placeTpSlOrder`). If the amend fails, the old stop is
+kept (the position stays protected), the failure is logged, and Telegram alerts the owner; it is retried next tick. In
+dry-run the move is only simulated, with a log/alert "would move SL to X". A successful move (or dry-run simulation)
+alerts: symbol, exchange, old SL, new SL, and the profit locked in USDT.
+
+Defaults (applied in memory on load when the keys are missing; enabled / dry-run are never touched): ON, trigger 30, lock 5.
+Commands: `/autotrade be on|off` · `/autotrade betrigger N` (10–90) · `/autotrade belock N` (0–50, must be below the
+trigger). Shown on the `/autotrade` panel (toggle button) and Mini App ▸ Auto ▸ Settings (on/off + the two fields, saved
+with "Save numbers").

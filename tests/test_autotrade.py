@@ -39,7 +39,10 @@ class Fake:
     def open_positions(self, sym=None): self._p("open_positions"); return [p for p in self.positions if not sym or p["symbol"] == sym]
     def stop_orders(self, sym): self._p("stop_orders", sym); return [s for s in self.stops if s["symbol"] == sym]
     def place_stop(self, pid, vol, sl=None, tp=None): self._p("place_stop", pid, vol, sl=sl, tp=tp)
-    def change_stop(self, sid, sl=None, tp=None): self._p("change_stop", sid, sl=sl, tp=tp)
+    def change_stop(self, sid, sl=None, tp=None):
+        self._p("change_stop", sid, sl=sl, tp=tp)
+        if getattr(self, "fail_change", None):
+            e = self.fail_change; self.fail_change = None; raise e
     def cancel_stops(self, pid): self._p("cancel_stops", pid)
     def n(self, name): return sum(1 for c in self.calls if c[0] == name)
 
@@ -228,9 +231,10 @@ def test_don20_trailing_and_ptp(monkeypatch):
     with db.conn() as c: c.execute("UPDATE don20 SET stop=98000.0")
     A.tick(cl=fk, px_fn=lambda s: {"BTCUSDT": 101000.0, "SOLUSDT": 150.05})
     assert [r for r in rows() if r["source"] == "DON20"][0]["sl"] == 98000.0 and any(c[0] == "place_stop" and c[2]["sl"] == 98000.0 for c in fk.calls)
-    A.tick(cl=fk, px_fn=lambda s: {"BTCUSDT": 101000.0, "SOLUSDT": 153.2})           # CHK TP1 (1.5R = 153) -> half + stop to entry
+    A.tick(cl=fk, px_fn=lambda s: {"BTCUSDT": 101000.0, "SOLUSDT": 153.2})           # CHK TP1 (1.5R = 153) -> half; BE+ then locks 5% of the final TP (156)
     r = [r for r in rows() if r["strategy"] == "CHK"][0]
-    assert r["half_done"] == 1 and r["sl"] == r["fill_price"] and r["pnl_usdt"] > 0
+    fp = float(r["fill_price"]); lock = round(fp + 0.05 * (156.0 - fp), 2)          # SOL tick 0.01
+    assert r["half_done"] == 1 and r["pnl_usdt"] > 0 and abs(r["sl"] - lock) < 1e-9 and json.loads(r["note"]).get("be_plus")
     assert any(c[0] == "create_order" and c[2]["side"] == 4 and c[2]["symbol"] == "SOL_USDT" for c in fk.calls)
 
 def test_daily_loss_limit(monkeypatch, fresh):
@@ -339,7 +343,10 @@ class FakeWeex:
         if cid in self.orders: self.orders[cid]["status"] = "CANCELED"
     def algo_orders(self, sym): self._p("algo_orders", sym); return [a for a in self.algos if a["symbol"] == sym]
     def place_tpsl(self, sym, ps, plan, trigger, cid): self._p("place_tpsl", sym, ps, plan, trigger)
-    def modify_tpsl(self, algo_id, trigger): self._p("modify_tpsl", algo_id, trigger)
+    def modify_tpsl(self, algo_id, trigger):
+        self._p("modify_tpsl", algo_id, trigger)
+        if getattr(self, "fail_modify", None):
+            e = self.fail_modify; self.fail_modify = None; raise e
     def cancel_algo(self, algo_id): self._p("cancel_algo", algo_id)
     def n(self, name): return sum(1 for c in self.calls if c[0] == name)
 
@@ -1014,3 +1021,127 @@ def test_order_type_and_wait_migration_and_commands(fresh):
     with pytest.raises(ValueError): A.save_settings(dict(order_type="limit_market_x"))
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
     assert "limit_market" not in src and "cancel_pct:+$('atcp').value" in src and "Follow the signal" in src
+
+# ---------- breakeven+ stop (t163u) ----------
+def test_be_plus_levels_use_final_tp_not_tp1():
+    """Trigger and lock are measured to the furthest/final TP (the signal TP), not TP1."""
+    assert A.final_tp({"tp": 103000}, {"tp": 104000}) == 104000          # src (live signal) wins: furthest current TP
+    assert A.final_tp({"tp": 103000}, {"sl": 99000}) == 103000
+    assert A.final_tp({"tp": None, "strategy": "DON20"}) is None
+    long = A.be_prices("long", 100000, 103000, 30, 5)
+    assert abs(long["trigger"] - 100900) < 1e-9 and abs(long["sl"] - 100150) < 1e-9
+    short = A.be_prices("short", 100000, 97000, 30, 5)
+    assert abs(short["trigger"] - 99100) < 1e-9 and abs(short["sl"] - 99850) < 1e-9
+    assert A.be_prices("long", 100000, 99000, 30, 5) is None              # TP on the wrong side
+    assert A.sl_better("long", 100150, 99000) and not A.sl_better("long", 98000, 99000)
+    assert A.sl_better("short", 99850, 101000) and not A.sl_better("short", 101500, 101000)
+    # CHK: TP1 is 1.5R = 103000 if sl=98000 entry=100000, but final TP is 106000 — trigger uses 106000
+    lv = A.be_prices("long", 100000, 106000, 30, 5)
+    assert abs(lv["trigger"] - 101800) < 1e-9 and abs(lv["sl"] - 100300) < 1e-9
+    assert A.target_of("CHK", 100000, 98000, 106000) == 103000            # cancel rule still uses TP1; BE+ does not
+
+def _fill_dry(symbol="BTCUSDT", direction="long", entry=100000.0, sl=99000.0, tp=103000.0, px_fill=100100.0, **kw):
+    enable(strategies=["BRK"], **kw); i = sig(symbol=symbol, direction=direction, entry=entry, sl=sl, tp=tp, status="pending")
+    fk = Fake(private_ok=False)
+    A.tick(cl=fk, px_fn=PX(px_fill if direction == "long" else (entry + (entry - px_fill))))
+    db.update(i, status="open", filled_at=datetime.now(timezone.utc).isoformat())
+    A.tick(cl=fk, px_fn=PX(px_fill)); r = rows()[-1]
+    assert r["status"] == "filled" and r["dry"] == 1
+    return i, fk, r
+
+def test_be_plus_dry_run_long(fresh):
+    i, fk, r = _fill_dry()
+    A.tick(cl=fk, px_fn=PX(100800.0)); r = rows()[0]                      # 26.7% of the way: not yet
+    assert r["sl"] == 99000.0 and not json.loads(r["note"] or "{}").get("be_plus") and fk.calls == []
+    A.tick(cl=fk, px_fn=PX(100900.0)); r = rows()[0]                      # 30% exactly
+    assert r["sl"] == 100150.0 and json.loads(r["note"])["be_plus"] and fk.calls == []
+    assert any("would move SL to" in t and "100,150" in t.replace("100150", "100,150") and "Profit locked in" in t and "DRY-RUN" in t for t in fresh)
+    A.tick(cl=fk, px_fn=PX(101500.0)); assert rows()[0]["sl"] == 100150.0  # already moved: no second move
+    # signal row unchanged (isolation)
+    assert db.get(i)["sl"] == 99000.0 and db.get(i)["status"] == "open"
+
+def test_be_plus_dry_run_short(fresh):
+    i, fk, r = _fill_dry(direction="short", sl=101000.0, tp=97000.0, px_fill=99900.0)
+    A.tick(cl=fk, px_fn=PX(99100.0)); r = rows()[0]
+    assert r["sl"] == 99850.0 and json.loads(r["note"])["be_plus"] and fk.calls == []
+    assert any("would move SL to" in t and "99,850" in t.replace("99850", "99,850") for t in fresh)
+
+def test_be_plus_trigger_not_reached_and_off(fresh):
+    _fill_dry(); A.tick(cl=Fake(False), px_fn=PX(100899.0)); r = rows()[0]  # just under 30%
+    assert r["sl"] == 99000.0 and not json.loads(r["note"] or "{}").get("be_plus")
+    A.save_settings(dict(be_plus=False)); _fill_dry(symbol="SOLUSDT", entry=150, sl=148, tp=156, px_fill=150.1)
+    A.tick(cl=Fake(False), px_fn=PX(155.0)); r = [x for x in rows() if x["symbol"] == "SOLUSDT"][0]
+    assert r["sl"] == 148.0 and not json.loads(r["note"] or "{}").get("be_plus")
+
+def test_be_plus_stop_already_better(fresh):
+    enable(strategies=["BRK"]); i = sig(status="pending")
+    A.tick(cl=Fake(False), px_fn=PX(100100.0)); db.update(i, status="open", filled_at=datetime.now(timezone.utc).isoformat())
+    A.tick(cl=Fake(False), px_fn=PX(100100.0)); r = rows()[0]
+    A._upd(r["id"], sl=100200.0)                                          # current stop already past the 5% lock (100150)
+    A.tick(cl=Fake(False), px_fn=PX(101000.0)); r = rows()[0]
+    assert r["sl"] == 100200.0 and json.loads(r["note"]).get("be_skip") == "stop already better"
+    assert not any("would move SL to" in t for t in fresh)
+
+def test_be_plus_live_mexc_amends_stop(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", strategies=["BRK"]); i = sig(status="open"); fk = Fake()
+    A.tick(cl=fk, px_fn=PX(100100.0)); r = rows()[0]
+    fk.positions = [dict(symbol="BTC_USDT", positionType=1, holdVol=r["vol"], positionId=9, openType=1, holdAvgPrice=100100.0)]
+    fk.stops = [dict(id=31, symbol="BTC_USDT", positionId=9, state=1)]
+    A.tick(cl=fk, px_fn=PX(100100.0)); assert rows()[0]["status"] == "filled"
+    A.tick(cl=fk, px_fn=PX(101000.0)); r = rows()[0]                      # fill 100100 → trigger 100970, lock 100245
+    ch = [c for c in fk.calls if c[0] == "change_stop"]
+    assert ch and ch[-1][2]["sl"] == 100245.0 and r["sl"] == 100245.0 and json.loads(r["note"])["be_plus"]
+    assert any("breakeven+" in t and "stop moved" in t and "Profit locked in" in t and "MEXC" in t for t in fresh)
+    n_ch = fk.n("change_stop")
+    A.tick(cl=fk, px_fn=PX(101200.0)); assert fk.n("change_stop") == n_ch and rows()[0]["sl"] == 100245.0  # once only
+    assert db.get(i)["sl"] == 99000.0                                     # signal tracker untouched
+
+def test_be_plus_live_weex_amends_stop(monkeypatch, fresh):
+    both_live(monkeypatch, order_type="auto", strategies=["BRK"]); A.save_settings(dict(exchanges="weex"))
+    i = sig(status="open"); fw = FakeWeex(); fk = Fake()
+    A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100100.0)); r = rows()[0]
+    assert r["exchange"] == "weex"
+    fw.pos = [dict(id=9, symbol="BTCUSDT", side="LONG", size=str(r["vol"]), openValue=str(100100.0 * r["vol"]), marginType="CROSSED")]
+    fw.algos = [dict(algoId=11, symbol="BTCUSDT", positionSide="LONG", orderType="STOP_MARKET", algoStatus="UNTRIGGERED", reduceOnly=True),
+                dict(algoId=12, symbol="BTCUSDT", positionSide="LONG", orderType="TAKE_PROFIT_MARKET", algoStatus="UNTRIGGERED", reduceOnly=True)]
+    A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(100100.0)); assert rows()[0]["status"] == "filled"
+    A.tick(cl={"mexc": fk, "weex": fw}, px_fn=PX(101000.0)); r = rows()[0]  # fill 100100 → trigger 100970, lock 100245
+    mods = [c for c in fw.calls if c[0] == "modify_tpsl"]
+    assert any(c[1] == (11, 100245.0) for c in mods) and r["sl"] == 100245.0 and json.loads(r["note"])["be_plus"]
+    assert any("would move SL to" not in t and "breakeven+" in t and "WEEX" in t and "Profit locked in" in t for t in fresh)
+    assert creates(fk) == []                                              # stayed on WEEX
+
+def test_be_plus_amend_failure_keeps_old_stop(monkeypatch, fresh):
+    live(monkeypatch, order_type="auto", strategies=["BRK"]); i = sig(status="open"); fk = Fake()
+    A.tick(cl=fk, px_fn=PX(100100.0)); r = rows()[0]
+    fk.positions = [dict(symbol="BTC_USDT", positionType=1, holdVol=r["vol"], positionId=9, openType=1, holdAvgPrice=100100.0)]
+    fk.stops = [dict(id=31, symbol="BTC_USDT", positionId=9, state=1)]
+    A.tick(cl=fk, px_fn=PX(100100.0)); fk.fail_change = M.MexcError(500, "plan amend failed", 500)
+    A.tick(cl=fk, px_fn=PX(101000.0)); r = rows()[0]
+    assert r["sl"] == 99000.0 and not json.loads(r["note"] or "{}").get("be_plus")   # old stop kept, not marked done
+    assert any("breakeven+ stop not moved" in t and "kept" in t and "99000" in t.replace(",", "") for t in fresh)
+    A.tick(cl=fk, px_fn=PX(101000.0)); r = rows()[0]                       # retry succeeds
+    assert r["sl"] == 100245.0 and json.loads(r["note"])["be_plus"]
+    ch = [c for c in fk.calls if c[0] == "change_stop"]
+    assert len(ch) >= 2 and ch[-1][2]["sl"] == 100245.0
+
+def test_be_plus_commands_defaults_miniapp_and_migration(fresh):
+    s = A.settings(0)
+    assert s["be_plus"] is True and s["be_trigger_pct"] == 30 and s["be_lock_pct"] == 5 and s["enabled"] is False and s["dry_run"] is True
+    db.kv_set(A.KEY, json.dumps(dict(enabled=False, dry_run=True, risk_usdt=0.5, exchanges=["mexc", "weex"])))
+    A._S.update(t=0, v=None); s = A.settings(0)
+    assert s["be_plus"] is True and s["be_trigger_pct"] == 30 and s["be_lock_pct"] == 5 and s["enabled"] is False and s["dry_run"] is True
+    A.tg_command("/autotrade be off"); assert A.settings(0)["be_plus"] is False
+    A.tg_command("/autotrade be on"); A.tg_command("/autotrade betrigger 40"); A.tg_command("/autotrade belock 10")
+    s = A.settings(0); assert s["be_plus"] is True and s["be_trigger_pct"] == 40 and s["be_lock_pct"] == 10
+    assert "⚠️" in A.tg_command("/autotrade betrigger 5")[0] and "⚠️" in A.tg_command("/autotrade belock 40")[0]  # lock must be < trigger (still 40)
+    A.tg_command("/autotrade belock 8"); A.tg_command("/autotrade betrigger 7")
+    assert "⚠️" in A.tg_command("/autotrade betrigger 7")[0] and A.settings(0)["be_trigger_pct"] == 40
+    A.tg_callback("at:be"); assert A.settings(0)["be_plus"] is False; A.tg_callback("at:be"); assert A.settings(0)["be_plus"] is True
+    A.tg_command("/autotrade betrigger 30"); A.tg_command("/autotrade belock 5")
+    t, mk = A.tg_command("/autotrade")
+    assert "Breakeven+: <b>ON</b>" in t and "lock 5% of the final-TP distance" in t and "30%" in t and "be on|off" in t
+    cbs = [b["callback_data"] for row in mk["inline_keyboard"] for b in row]
+    assert "at:be" in cbs
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "desk.html")).read()
+    assert "be_trigger_pct:+$('atbt').value" in src and "be_lock_pct:+$('atbl').value" in src and "atSet({be_plus:true})" in src

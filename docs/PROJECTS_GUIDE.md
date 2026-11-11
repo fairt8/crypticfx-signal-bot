@@ -15,7 +15,7 @@ A crypto and forex signal generator: a Telegram bot and scanner, a web dashboard
 |---|---|---|
 | CrypticFx signal bot (Telegram bot and scanner) | App | 1. Live crypto and forex signals in PRIMARY and SECONDARY tiers, with background-only strategies kept off the alert feed. 2. Telegram alerts as setups appear, plus a PnL and position summary every 6 hours. 3. A continuously running scanner hosted on a private server. |
 | Web dashboard and Telegram Mini App | App | 1. Signal lists with outcomes. 2. Strategy stats. 3. Equity cards (in dollars and in R). |
-| Auto-trade | App feature | 1. Exchange selection: MEXC only, WEEX only, or both in either order. 2. Three sizing modes (dollar risk, fixed margin, percent of balance), a min-order bump, Limit / Market / Limit-to-Market orders, and max leverage with a liquidation guard. 3. Auto-trade alerts that show position size and dollar risk. |
+| Auto-trade | App feature | 1. Exchange selection: MEXC only, WEEX only, or both in either order. 2. Three sizing modes (dollar risk, fixed margin, percent of balance), a min-order bump, entry type that follows the signal (limit or market; unfilled limits are cancelled, never converted to market), max leverage with a liquidation guard, and an automatic breakeven+ stop (default: once price is 30% of the way to the final TP, move the stop to lock 5% of that distance). 3. Auto-trade alerts that show position size and dollar risk. |
 | Research and backtesting | Workflow | 1. Multi-year backtests (at least 3 years where the data allows) of live and candidate rules. 2. A monthly backtest routine that replays the live code paths. 3. A weekly strategy report (not yet successfully delivered). |
 
 ### 1. CrypticFx signal bot
@@ -63,14 +63,14 @@ A crypto and forex signal generator: a Telegram bot and scanner, a web dashboard
 **Produces:**
 
 1. Exchange selection: MEXC only, WEEX only, or both in either order (default is MEXC first, WEEX as fallback).
-2. Three sizing modes, a min-order bump, Limit / Market / Limit-to-Market (5, 10 or 15 minute window), and max leverage with a liquidation guard.
+2. Three sizing modes, a min-order bump, entry type that follows the signal (unfilled limits cancelled at 70% of the way to the target / the stop / a 24 h max wait, never converted to market), max leverage with a liquidation guard, and a breakeven+ stop move (default ON: 30% of the way to the final TP → lock 5%).
 3. Auto-trade alerts that show position size and dollar risk (and the old versus new size when a min-order bump is used).
 
 **Status:** built and deployed, but the master switch is OFF and dry-run is on. Dollar-risk sizing is the default; fixed-margin and percent-of-balance modes are built and stay off until the owner picks one.
 
 **Complete means:** WEEX credentials are installed and tested, a dry-run period has finished, and the owner has decided whether to go live. Until then, auto-trade must stay off and in dry-run.
 
-- [x] Built and deployed: exchange modes, three sizing modes, min-order bump (on by default; cap is 2× the trade's own risk unless a custom cap is set), Limit / Market / Limit-to-Market, max leverage with a liquidation guard.
+- [x] Built and deployed: exchange modes, three sizing modes, min-order bump (on by default; cap is 2× the trade's own risk unless a custom cap is set), entry type that follows the signal, breakeven+ stop (on by default; trigger 30% / lock 5% of the final TP, once, never loosen), max leverage with a liquidation guard.
 - [x] Master switch off, dry-run on. If auto-trade or an exchange fails, signals and alerts continue unchanged.
 - [x] MEXC adapter in place; a read-only balance check has been run. The MEXC balance is small (about $6).
 - [ ] The WEEX API key, secret and passphrase still need installing and testing (a read-only check, then a dry-run order test).
